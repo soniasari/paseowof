@@ -1,0 +1,93 @@
+// Reglas de Seguridad de Firestore para PaseoWoof
+// Estas reglas aseguran que cada paseador solo pueda acceder a sus propios datos
+// Incluye validación de formato de CI boliviano
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Función auxiliar para verificar autenticación
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Función para verificar que el usuario accede a sus propios datos
+    function isOwner(paseadorId) {
+      return request.auth.uid == paseadorId;
+    }
+    
+    // Función para validar formato de CI boliviano
+    // Formato esperado: 5-8 dígitos seguidos de espacio y 2 letras mayúsculas (ej: "1234567 LP")
+    function isValidCI(ci) {
+      return ci is string && ci.matches('^\\d{5,8}\\s[A-Z]{2}$');
+    }
+    
+    // Reglas para paseadores
+    match /paseadores/{paseadorId} {
+      // Solo el propietario puede leer y escribir su propio documento de paseador
+      allow read, write: if isSignedIn() && isOwner(paseadorId);
+      
+      // Validar CI en creación (formato boliviano: "1234567 LP")
+      allow create: if isSignedIn() && 
+                       isOwner(paseadorId) &&
+                       isValidCI(request.resource.data.ci);
+      
+      // Reglas para subcolecciones de propietarios
+      match /propietarios/{propietarioId} {
+        // Solo el paseador propietario puede leer y escribir sus propietarios
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+        
+        // Validar CI en creación de propietarios
+        allow create: if isSignedIn() && 
+                         isOwner(paseadorId) &&
+                         isValidCI(request.resource.data.ci);
+      }
+      
+      // Reglas para subcolecciones de caninos
+      match /caninos/{caninoId} {
+        // Solo el paseador propietario puede leer y escribir sus caninos
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+      }
+      
+      // Reglas para subcolecciones de paseos
+      match /paseos/{paseoId} {
+        // Solo el paseador propietario puede leer y escribir sus paseos
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+        
+        // Subcolección de paseos_caninos (relación muchos a muchos)
+        match /paseos_caninos/{paseoCaninoId} {
+          // Solo el paseador propietario puede leer y escribir los paseos_caninos
+          allow read, write: if isSignedIn() && isOwner(paseadorId);
+        }
+      }
+      
+      // Reglas para subcolecciones de notificaciones
+      match /notificaciones/{notificacionId} {
+        // Solo el paseador propietario puede leer y escribir sus notificaciones
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+      }
+    }
+    
+    // Denegar acceso a cualquier otra colección o documento
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+// INSTRUCCIONES PARA DESPLEGAR LAS REGLAS:
+// 
+// 1. Asegúrate de tener Firebase CLI instalado:
+//    npm install -g firebase-tools
+//
+// 2. Inicia sesión en Firebase:
+//    firebase login
+//
+// 3. Despliega las reglas:
+//    firebase deploy --only firestore:rules
+//
+// O desde la consola de Firebase:
+// - Ve a Firestore Database > Reglas
+// - Copia y pega el contenido de este archivo (sin los comentarios de instrucciones)
+// - Publica las reglas

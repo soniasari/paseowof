@@ -1,0 +1,64 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Función auxiliar para verificar autenticación
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Función para verificar que el usuario accede a sus propios datos
+    function isOwner(paseadorId) {
+      return request.auth.uid == paseadorId;
+    }
+    
+    // Función para validar formato de CI boliviano
+    function isValidCI(ci) {
+      return ci is string && ci.matches('^\\d{5,8}\\s[A-Z]{2}$');
+    }
+    
+    // Reglas para paseadores
+    match /paseadores/{paseadorId} {
+      allow read, write: if isSignedIn() && isOwner(paseadorId);
+      
+      // Validar CI en creación
+      allow create: if isSignedIn() && 
+                       isOwner(paseadorId) &&
+                       isValidCI(request.resource.data.ci);
+      
+      // Reglas para subcolecciones de propietarios
+      match /propietarios/{propietarioId} {
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+        allow create: if isSignedIn() && 
+                         isOwner(paseadorId) &&
+                         isValidCI(request.resource.data.ci);
+      }
+      
+      // Reglas para subcolecciones de caninos
+      match /caninos/{caninoId} {
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+      }
+      
+      // Reglas para subcolecciones de paseos
+      match /paseos/{paseoId} {
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+        
+        // Subcolección de paseos_caninos (relación muchos a muchos)
+        match /paseos_caninos/{paseoCaninoId} {
+          allow read, write: if isSignedIn() && isOwner(paseadorId);
+        }
+      }
+      
+      // Reglas para subcolecciones de notificaciones
+      match /notificaciones/{notificacionId} {
+        allow read, write: if isSignedIn() && isOwner(paseadorId);
+      }
+    }
+    
+    // Denegar acceso a cualquier otra colección o documento
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
