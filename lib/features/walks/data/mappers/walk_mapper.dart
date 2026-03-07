@@ -13,7 +13,7 @@ class WalkMapper {
       'estado': walk.estado,
       'direccionRecogida': walk.direccionRecogida,
       'observaciones': walk.observaciones,
-      'precio': walk.precio,
+      'precioPaseo': walk.precio,
       'notificacionEnviada': walk.notificacionEnviada,
       'fechaCreacion': walk.fechaCreacion.toIso8601String(),
       'fechaModificacion': walk.fechaModificacion.toIso8601String(),
@@ -36,7 +36,7 @@ class WalkMapper {
       estado: map['estado'] ?? 'programado',
       direccionRecogida: map['direccionRecogida'],
       observaciones: map['observaciones'],
-      precio: map['precio'] != null ? (map['precio'] as num).toDouble() : null,
+      precio: map['precioPaseo'] != null ? (map['precioPaseo'] as num).toDouble() : null,
       notificacionEnviada: map['notificacionEnviada'] ?? false,
       fechaCreacion: map['fechaCreacion'] != null
           ? DateTime.parse(map['fechaCreacion'])
