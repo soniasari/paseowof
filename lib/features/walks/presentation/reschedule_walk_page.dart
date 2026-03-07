@@ -272,10 +272,11 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
 
     // Reprogramar el paseo
     try {
-      // Parsear precio
+      // Parsear precio (aceptar coma o punto como decimal)
       double? precio;
       if (_precioController.text.trim().isNotEmpty) {
-        precio = double.tryParse(_precioController.text.trim());
+        final precioStr = _precioController.text.trim().replaceAll(',', '.');
+        precio = double.tryParse(precioStr);
         if (precio == null || precio < 0) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
