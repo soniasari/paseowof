@@ -564,7 +564,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
           );
         }
 
-        // Si la hora seleccionada ya no está en la lista (ej. 07:00 y ahora es de noche), valor en blanco.
+        // Si la hora seleccionada ya no está en la lista.
         final valorHoraInicio = horariosDisponibles.contains(formState.horaInicio)
             ? formState.horaInicio
             : null;

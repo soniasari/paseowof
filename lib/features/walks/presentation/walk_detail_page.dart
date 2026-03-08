@@ -48,10 +48,8 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
     return DateFormat('hh:mm a', 'es').format(dt);
   }
 
-  /// Flujo de cancelación del paseo (Riverpod + use case, sin depender del WalksController).
-  /// 1. Diálogo pide motivo; 2. [updateWalkStatusUseCaseProvider] actualiza estado en Firestore;
-  /// 3. Se cancelan notificaciones locales; 4. Se invalidan providers de lista para refrescar Home;
-  /// 5. SnackBar de éxito con icono [Icons.lock] y pop a la pantalla anterior.
+  /// Flujo de cancelación del paseo
+
   Future<void> _handleCancelWalk() async {
     if (!mounted) return;
     final motivo = await showDialog<String>(
@@ -64,7 +62,7 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
     );
     if (motivo == null || !mounted) return;
     try {
-      // Riverpod: uso del use case inyectado por DI (evita WalksController después de dispose).
+      // Riverpod: uso del use case inyectado por DI 
       final useCase = ref.read(updateWalkStatusUseCaseProvider);
       await useCase.execute(
         paseadorId: widget.paseadorId,
@@ -117,7 +115,7 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Riverpod: observamos los providers del feature para datos reactivos.
+    
     final walkPetsAsync = ref.watch(walkPetsProvider(
       WalkPetsParams(paseadorId: widget.paseadorId, walkId: widget.walk.id),
     ));
@@ -131,17 +129,28 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          'Detalle del Paseo',
-          style: TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textDark,
+        title: const Text.rich(
+          TextSpan(
+            text: 'Paseo',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w500,
+              color: AppColors.white,
+            ),
+            children: [
+              TextSpan(
+                text: 'Woow',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.white,
+                ),
+              ),
+            ],
           ),
         ),
         centerTitle: true,
-        backgroundColor: AppColors.white,
-        foregroundColor: AppColors.textDark,
+        backgroundColor: AppColors.button,
+        foregroundColor: AppColors.white,
         elevation: 0,
         actions: [
           IconButton(
@@ -223,7 +232,7 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
               loading: () => _buildDogSection(petName: '—', breedAge: '—'),
               error: (_, __) => _buildDogSection(petName: '—', breedAge: '—'),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
             // INFORMACIÓN DEL DUEÑO
             const Text(
               'INFORMACIÓN DEL DUEÑO',
@@ -395,7 +404,7 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
     );
   }
 
-  /// Fila "Notas Especiales": valor desde [Pet.observaciones] del canino del paseo (Riverpod: walkPets + pets).
+  /// Fila "Notas Especiales"
   Widget _buildNotasEspecialesRow(
     AsyncValue<List<WalkPet>> walkPetsAsync,
     AsyncValue<List<Pet>> petsAsync,
@@ -456,23 +465,23 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
     );
   }
 
-  /// Bloque de la sección perro: imagen, nombre y texto raza/edad (dato de caninos vía Riverpod).
+  /// Bloque de la sección perro: imagen, nombre y texto raza/edad (dato de caninos).
   Widget _buildDogSection({required String petName, required String breedAge}) {
     return Center(
       child: Column(
         children: [
           Image.asset(
             'images/dog.png',
-            width: 72,
-            height: 72,
+            width: 70,
+            height: 70,
             fit: BoxFit.contain,
             errorBuilder: (_, __, ___) => Icon(Icons.pets, size: 48, color: AppColors.button),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           Text(
             petName,
             style: const TextStyle(
-              fontSize: 22,
+              fontSize: 21,
               fontWeight: FontWeight.bold,
               color: AppColors.textDark,
             ),
