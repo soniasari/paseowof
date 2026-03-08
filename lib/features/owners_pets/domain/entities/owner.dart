@@ -1,12 +1,12 @@
 class Owner {
-  final String id; // propietario_id
-  final String paseadorId; // paseador_id - referencia al paseador
+  final String id;
+  final String paseadorId;
   final String nombre;
-  final String ci; // Formato: "7654321 LP" - Carnet de Identidad OBLIGATORIO
+  final String ci; // Carnet, ej. "7654321 LP"
   final String? telefono;
   final String? direccion;
   final String? email;
-  final DateTime fechaRegistro; // fecha_registro
+  final DateTime fechaRegistro;
   final bool activo;
 
   Owner({

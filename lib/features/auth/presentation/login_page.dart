@@ -35,10 +35,9 @@ class LoginPage extends ConsumerWidget {
 
       formController.setMessage('¡Bienvenido! Redireccionando...', AppColors.button);
 
-      // Resetear el índice de navegación a 0 (home) antes de navegar
       ref.read(homeNavigationControllerProvider.notifier).setIndex(0);
 
-      // Navegar a la pantalla principal después de un delay
+      // Volvemos al inicio y abrimos la pantalla principal
       Future.delayed(const Duration(milliseconds: 500), () {
         if (context.mounted) {
           Navigator.pushReplacement(
@@ -78,8 +77,7 @@ class LoginPage extends ConsumerWidget {
     final passwordController = ref.watch(loginPasswordControllerProvider);
     final isLoading = authState.isLoading || formState.isLoading;
     
-    // Limpiar el mensaje del formulario cuando el usuario es null (cerró sesión)
-    // Esto evita que se muestren mensajes de sesiones anteriores
+    // Si cerró sesión, limpiamos el mensaje para no mostrar cosas de la sesión anterior
     authState.whenData((user) {
       if (user == null && formState.message.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -99,7 +97,7 @@ class LoginPage extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // 1. Logo y Título
+                // Logo y título
                 Image.asset(
                   'images/dog.png',
                   width: 64,
@@ -139,7 +137,7 @@ class LoginPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 48),
 
-                // 2. Mensaje de Estado
+                // Mensaje (error, éxito, etc.)
                 if (formState.message.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -160,7 +158,7 @@ class LoginPage extends ConsumerWidget {
                     ),
                   ),
 
-                // 3. Formulario de Login
+                // Formulario
                 Form(
                   key: formKey,
                   child: Column(
@@ -185,7 +183,7 @@ class LoginPage extends ConsumerWidget {
                 ),
 
                 const SizedBox(height: 8),
-                // Enlace de "Olvidé Contraseña"
+                // Olvidé contraseña
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
@@ -209,7 +207,7 @@ class LoginPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 32),
 
-                // 4. Botón de Iniciar Sesión
+                // Botón entrar
                 AppButton(
                   text: 'INICIAR SESIÓN',
                   onPressed: isLoading ? null : () async => await _handleLogin(context, ref),
@@ -232,7 +230,7 @@ class LoginPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 48),
 
-                // 5. Separador y Enlace de Registro
+                // Separador y link a registro
                 Row(
                   children: [
                     Expanded(
@@ -261,7 +259,7 @@ class LoginPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 24),
 
-                // Botón de Registro
+                // Botón registrarse
                 TextButton.icon(
                   onPressed: () {
                     Navigator.push(

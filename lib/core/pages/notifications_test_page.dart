@@ -148,12 +148,12 @@ class _NotificationsTestPageState extends State<NotificationsTestPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         foregroundColor: AppColors.white,
         elevation: 0,
         centerTitle: true,
       ),
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16.0),

@@ -25,9 +25,8 @@ class PetController extends StateNotifier<AsyncValue<void>> {
     try {
       state = const AsyncValue.loading();
 
-      // Crear objeto Pet
       final pet = Pet(
-        id: '', // Se generará automáticamente por Firestore
+        id: '', // Firestore lo genera al guardar
         paseadorId: paseadorId,
         propietarioId: propietarioId,
         nombre: nombre,
@@ -43,7 +42,7 @@ class PetController extends StateNotifier<AsyncValue<void>> {
         activo: true,
       );
 
-      // Generar ID único para el canino
+      // ID único del canino (para el doc en Firestore)
       final petId = FirebaseFirestore.instance
           .collection('paseadores')
           .doc(paseadorId)
@@ -93,13 +92,13 @@ class PetController extends StateNotifier<AsyncValue<void>> {
     try {
       state = const AsyncValue.loading();
 
-      // Obtener el canino existente para preservar fechaRegistro
+      // Traemos el canino actual para no perder fecha de registro ni activo
       final existingPet = await _repository.getPetById(paseadorId, petId);
       if (existingPet == null) {
         throw Exception('Canino no encontrado');
       }
 
-      // Crear objeto Pet actualizado
+      // Armamos el canino actualizado
       final updatedPet = Pet(
         id: petId,
         paseadorId: paseadorId,
@@ -113,8 +112,8 @@ class PetController extends StateNotifier<AsyncValue<void>> {
         peso: peso,
         color: color,
         foto: foto,
-        fechaRegistro: existingPet.fechaRegistro, // Preservar fecha original
-        activo: existingPet.activo, // Preservar estado activo
+        fechaRegistro: existingPet.fechaRegistro,
+        activo: existingPet.activo,
       );
 
       await _repository.savePet(updatedPet);

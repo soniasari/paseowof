@@ -1,3 +1,11 @@
+// =============================================================================
+// WALKS CONTROLLER — StateNotifier para Riverpod
+// =============================================================================
+// Orquesta programar/reprogramar paseos y actualizar estado (completado/cancelado).
+// Inyectado por [walksControllerProvider]; el detalle de paseo puede usar
+// [updateWalkStatusUseCaseProvider] directo para cancelar y evitar dispose.
+// =============================================================================
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,12 +13,13 @@ import '../../../../core/services/local_notification_service.dart';
 import '../../domain/entities/walk.dart';
 import '../../domain/entities/walk_pet.dart';
 import '../../domain/repositories/walks_repository.dart';
-import '../providers/walks_providers.dart';
+import '../../domain/use_cases/update_walk_status_use_case.dart';
 
 class WalksController extends StateNotifier<AsyncValue<void>> {
-  WalksController(this._repository) : super(const AsyncValue.data(null));
+  WalksController(this._repository, this._updateWalkStatusUseCase) : super(const AsyncValue.data(null));
 
   final WalksRepository _repository;
+  final UpdateWalkStatusUseCase _updateWalkStatusUseCase;
 
   Future<void> scheduleWalk({
     required String paseadorId,
@@ -29,7 +38,7 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     try {
       state = const AsyncValue.loading();
 
-      // Generar ID único para el paseo
+      // Armamos el ID del paseo (único para Firestore)
       final walkId = FirebaseFirestore.instance
           .collection('paseadores')
           .doc(paseadorId)
@@ -37,7 +46,7 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
           .doc()
           .id;
 
-      // Crear objeto Walk
+      // Armamos el paseo con todos los datos
       final walk = Walk(
         id: walkId,
         paseadorId: paseadorId,
@@ -55,10 +64,10 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         fechaModificacion: DateTime.now(),
       );
 
-      // Guardar el paseo
+      // Guardamos el paseo en Firestore
       await _repository.saveWalk(walk);
 
-      // Guardar las relaciones paseo-canino
+      // Guardamos qué caninos van en este paseo
       for (int i = 0; i < caninoIds.length; i++) {
         final walkPetId = FirebaseFirestore.instance
             .collection('paseadores')
@@ -79,11 +88,10 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         await _repository.saveWalkPet(paseadorId, walkId, walkPet);
       }
 
-      // Marcar como completado ANTES de programar notificaciones para no bloquear la UI
+      // Primero marcamos listo para no trabar la pantalla
       state = const AsyncValue.data(null);
 
-      // Programar notificaciones locales de forma asíncrona (no bloquear el flujo principal)
-      // IMPORTANTE: Usar Future.microtask para asegurar que se ejecute después del build
+      // Las notificaciones las programamos después (en segundo plano) para no bloquear
       Future.microtask(() async {
         await _scheduleNotificationsAsync(
           walkId: walkId,
@@ -100,6 +108,7 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     }
   }
 
+  /// Actualiza el estado del paseo (ej. completado, cancelado) en Firestore y cancela notificaciones si aplica.
   Future<void> updateWalkStatus({
     required String paseadorId,
     required String walkId,
@@ -109,32 +118,21 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     try {
       state = const AsyncValue.loading();
 
-      // Obtener el paseo actual
-      final walk = await _repository.getWalkById(paseadorId, walkId);
-      if (walk == null) {
-        throw Exception('Paseo no encontrado');
-      }
-
-      // Actualizar el estado
-      final updatedWalk = walk.copyWith(
+      await _updateWalkStatusUseCase.execute(
+        paseadorId: paseadorId,
+        walkId: walkId,
         estado: estado,
-        fechaModificacion: DateTime.now(),
         motivoCancelacion: motivoCancelacion,
       );
 
-      // Guardar el paseo actualizado
-      await _repository.saveWalk(updatedWalk);
-
-      // Cancelar notificaciones si el paseo fue cancelado o completado
+      // Si canceló o completó, sacamos las notificaciones programadas
       if (estado == 'cancelado' || estado == 'completado') {
         try {
           final notificationService = LocalNotificationService();
-          // Cancelar notificación principal (usando hash del walkId)
           await notificationService.cancelNotification(walkId.hashCode.abs());
-          // Cancelar notificación de recordatorio (hash + 1)
           await notificationService.cancelNotification(walkId.hashCode.abs() + 1);
         } catch (e) {
-          // Si falla la cancelación, no fallar todo el proceso
+          // Si falla no tiramos todo el proceso
           print('Error al cancelar notificaciones: $e');
         }
       }
@@ -161,13 +159,13 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     try {
       state = const AsyncValue.loading();
 
-      // Obtener el paseo actual
+      // Traemos el paseo para actualizarlo
       final walk = await _repository.getWalkById(paseadorId, walkId);
       if (walk == null) {
         throw Exception('Paseo no encontrado');
       }
 
-      // Actualizar el paseo con los nuevos datos
+      // Armamos el paseo con los datos nuevos (fecha, hora, precio, etc.)
       final updatedWalk = walk.copyWith(
         fechaPaseo: nuevaFechaPaseo,
         horaInicio: nuevaHoraInicio,
@@ -175,19 +173,17 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         duracionMinutos: nuevaDuracionMinutos,
         direccionRecogida: nuevaDireccionRecogida,
         precio: nuevoPrecio ?? walk.precio,
-        estado: 'programado', // Mantener como programado
+        estado: 'programado',
         fechaModificacion: DateTime.now(),
-        notificacionEnviada: false, // Resetear para enviar nuevas notificaciones
+        notificacionEnviada: false, // Para que se envíen de nuevo las notis
       );
 
-      // Guardar el paseo actualizado
+      // Guardamos el paseo actualizado
       await _repository.saveWalk(updatedWalk);
 
-      // Marcar como completado primero para no bloquear la UI
       state = const AsyncValue.data(null);
 
-      // Cancelar notificaciones antiguas y programar nuevas de forma asíncrona
-      // IMPORTANTE: Usar Future.microtask para asegurar que se ejecute después del build
+      // Notificaciones viejas las cancelamos y programamos las nuevas en segundo plano
       Future.microtask(() async {
         await _rescheduleNotificationsAsync(
           walkId: walkId,
@@ -204,9 +200,8 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     }
   }
 
-  /// Programa notificaciones de forma asíncrona sin bloquear el flujo principal
-  /// Este método se ejecuta en segundo plano después de que el paseo se haya guardado
-  /// Respeta la arquitectura Riverpod al no modificar el estado del StateNotifier
+  /// Programa las notificaciones del paseo (hora de inicio y recordatorio 15 min antes).
+  /// Se corre en segundo plano para no trabar la pantalla.
   Future<void> _scheduleNotificationsAsync({
     required String walkId,
     required String propietarioNombre,
@@ -218,12 +213,11 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     try {
       final notificationService = LocalNotificationService();
       
-      // Verificar que el servicio esté inicializado
       if (!notificationService.isInitialized) {
         await notificationService.initialize();
       }
       
-      // Programar notificación para cuando toque el paseo
+      // Noti para la hora del paseo
       await notificationService.scheduleWalkStartNotification(
         walkId: walkId,
         propietarioNombre: propietarioNombre,
@@ -233,7 +227,7 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         direccion: direccionRecogida,
       );
 
-      // Programar recordatorio 15 minutos antes
+      // Recordatorio 15 min antes
       await notificationService.scheduleWalkReminderNotification(
         walkId: walkId,
         propietarioNombre: propietarioNombre,
@@ -242,14 +236,11 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         horaInicio: horaInicio,
       );
     } catch (e) {
-      // Si falla la programación de notificaciones, no fallar todo el proceso
-      // Solo loguear el error sin bloquear
+      // Si falla no tiramos el flujo, solo no se programan las notis
     }
   }
 
-  /// Cancela notificaciones antiguas y programa nuevas de forma asíncrona
-  /// Este método se ejecuta en segundo plano después de que el paseo se haya actualizado
-  /// Respeta la arquitectura Riverpod al no modificar el estado del StateNotifier
+  /// Cancela las notis viejas y programa las nuevas (reprogramación de paseo).
   Future<void> _rescheduleNotificationsAsync({
     required String walkId,
     required String propietarioNombre,
@@ -261,11 +252,10 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
     try {
       final notificationService = LocalNotificationService();
       
-      // Cancelar notificaciones antiguas
       await notificationService.cancelNotification(walkId.hashCode.abs());
       await notificationService.cancelNotification(walkId.hashCode.abs() + 1);
       
-      // Programar notificación para cuando toque el paseo
+      // Programamos de nuevo la noti de la hora del paseo
       await notificationService.scheduleWalkStartNotification(
         walkId: walkId,
         propietarioNombre: propietarioNombre,
@@ -275,7 +265,7 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         direccion: nuevaDireccionRecogida,
       );
 
-      // Programar recordatorio 15 minutos antes
+      // Recordatorio 15 min antes
       await notificationService.scheduleWalkReminderNotification(
         walkId: walkId,
         propietarioNombre: propietarioNombre,
@@ -284,13 +274,8 @@ class WalksController extends StateNotifier<AsyncValue<void>> {
         horaInicio: nuevaHoraInicio,
       );
     } catch (e) {
-      // Si falla la programación de notificaciones, no fallar todo el proceso
       print('Error al reprogramar notificaciones: $e');
     }
   }
 }
 
-final walksControllerProvider = StateNotifierProvider.autoDispose<WalksController, AsyncValue<void>>((ref) {
-  final repository = ref.watch(walksRepositoryProvider);
-  return WalksController(repository);
-});

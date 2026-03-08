@@ -1,5 +1,4 @@
-/// Entidad para la relación muchos a muchos entre paseos y caninos
-/// Representa la tabla intermedia paseos_caninos
+/// Relación paseo–canino: qué canino va en cada paseo (paseos_caninos en Firestore)
 class WalkPet {
   final String id; // paseo_canino_id
   final String paseoId; // paseo_id - referencia al paseo

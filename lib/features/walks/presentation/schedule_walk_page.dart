@@ -9,7 +9,6 @@ import '../../owners_pets/domain/entities/owner.dart';
 import '../../owners_pets/presentation/providers/owner_pet_providers.dart';
 import '../../auth/presentation/providers/auth_providers.dart';
 import 'package:paseowof/features/walks/domain/entities/walk.dart';
-import 'controllers/walks_controller.dart';
 import 'controllers/schedule_walk_form_controller.dart';
 import 'providers/walks_providers.dart';
 import 'utils/schedule_availability_service.dart';
@@ -57,6 +56,12 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       final controller = ref.read(scheduleWalkFormControllerProvider.notifier);
       controller.setSelectedDate(picked);
       _fechaController.text = '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+      // Forzar recarga de paseos del día seleccionado para que los horarios se calculen con datos frescos.
+      final user = ref.read(authControllerProvider).value;
+      if (user != null) {
+        final day = DateTime(picked.year, picked.month, picked.day);
+        ref.invalidate(walksByDateProvider(WalksByDateParams(paseadorId: user.uid, date: day)));
+      }
     }
   }
 
@@ -70,20 +75,19 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
     controller.setHoraFin(horaFin);
   }
 
+  /// Opciones de hora de fin: desde inicio+30 min hasta 23:00 cada 30 min.
+  /// La lista final se filtra con [ScheduleAvailabilityService.verificarDisponibilidadHorario]
+  /// usando los paseos del día (Riverpod) para no ofrecer franjas ya ocupadas.
   List<String> _getHorariosFinDisponibles(String? horaInicio) {
-    if (horaInicio == null) {
-      return [];
-    }
+    if (horaInicio == null) return [];
 
     final partesInicio = horaInicio.split(':');
     final horaInicioInt = int.parse(partesInicio[0]);
     final minutoInicioInt = partesInicio.length > 1 ? int.parse(partesInicio[1]) : 0;
     final inicioTotalMinutos = horaInicioInt * 60 + minutoInicioInt;
-    
-    // Generar horarios de fin con intervalos de 30 minutos
-    // Empezar 30 minutos después de la hora inicio, hasta las 19:00
+
     final horariosFin = <String>[];
-    for (int minutos = inicioTotalMinutos + 30; minutos <= 19 * 60; minutos += 30) {
+    for (int minutos = inicioTotalMinutos + 30; minutos <= 23 * 60; minutos += 30) {
       final hora = minutos ~/ 60;
       final minuto = minutos % 60;
       horariosFin.add('${hora.toString().padLeft(2, '0')}:${minuto.toString().padLeft(2, '0')}');
@@ -101,7 +105,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Completa todos los campos requeridos'),
+            content: Text('Faltan datos, completá todos los campos.'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -109,7 +113,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       return;
     }
 
-    // Obtener datos del perro y propietario
+    // Traemos el perro y el propietario
     final petsAsync = ref.read(petsListProvider(user.uid));
     final pets = petsAsync.value ?? [];
     if (pets.isEmpty) {
@@ -148,7 +152,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       orElse: () => owners.first,
     );
 
-    // Calcular duración en minutos
+    // Cuántos minutos dura el paseo
     final partesInicio = formState.horaInicio!.split(':');
     final partesFin = formState.horaFin!.split(':');
     final inicioMinutes = int.parse(partesInicio[0]) * 60 + int.parse(partesInicio[1]);
@@ -167,8 +171,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       return;
     }
 
-    // Verificar disponibilidad final antes de guardar
-    // En modo offline, esta verificación puede fallar, pero permitimos continuar
+    // Revisamos si el horario está libre (si estamos offline puede fallar, pero seguimos igual)
     List<Walk> walksExistentes = [];
     try {
       final repository = ref.read(walksRepositoryProvider);
@@ -178,15 +181,12 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       ).timeout(
         const Duration(seconds: 5),
         onTimeout: () {
-          // Si hay timeout (sin conexión), retornar lista vacía
-          // La verificación de disponibilidad se hará solo con datos locales
+          // Sin conexión devolvemos vacío y usamos lo que haya en caché
           return <Walk>[];
         },
       );
     } catch (e) {
-      // Si falla la verificación (sin conexión), usar lista vacía
-      // Esto permite continuar con la programación en modo offline
-      // Los datos se guardarán localmente y se sincronizarán cuando haya conexión
+      // Sin conexión seguimos con lista vacía; el paseo se guarda local y después sincroniza
       walksExistentes = [];
     }
 
@@ -201,7 +201,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Este horario ya está ocupado. Por favor, selecciona otro horario.'),
+            content: Text('Ese horario ya está ocupado, elegí otro.'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -209,9 +209,8 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       return;
     }
 
-    // Guardar el paseo
     try {
-      // Parsear precio (aceptar coma o punto como decimal)
+      // Precio: aceptamos coma o punto (ej. 25,5 o 25.5)
       double? precio;
       if (_precioController.text.trim().isNotEmpty) {
         final precioStr = _precioController.text.trim().replaceAll(',', '.');
@@ -220,7 +219,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Ingresa un precio válido'),
+                content: Text('Poné un precio válido (número).'),
                 backgroundColor: AppColors.error,
               ),
             );
@@ -245,23 +244,20 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
           ).timeout(
         const Duration(seconds: 15),
         onTimeout: () {
-          // Si hay timeout, asumimos que está offline pero los datos se guardaron localmente
-          throw TimeoutException('Sin conexión a internet. El paseo se guardó localmente y se sincronizará cuando haya conexión.');
+          throw TimeoutException('Sin conexión. El paseo quedó guardado y se subirá cuando haya internet.');
         },
       );
 
-      // Invalidar providers para refrescar la lista de paseos
-      // Usar un pequeño delay para asegurar que Firestore haya actualizado su caché local
+      // Invalidar providers de Riverpod para que, al programar otro paseo el mismo día,
+      // los horarios ya ocupados (ej. 21:30–22:00) no aparezcan en el dropdown.
       Future.delayed(const Duration(milliseconds: 300), () {
-        // Invalidar provider de la fecha seleccionada
         ref.invalidate(walksByDateProvider(
           WalksByDateParams(paseadorId: user.uid, date: formState.selectedDate),
         ));
-        // Invalidar provider de todos los estados para la fecha seleccionada
         ref.invalidate(walksByDateAllStatusProvider(
           WalksByDateParams(paseadorId: user.uid, date: formState.selectedDate),
         ));
-        // Si la fecha seleccionada es diferente a hoy, también invalidar hoy
+        // Si eligió otra fecha, también refrescamos hoy
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
         final selectedDateNormalized = DateTime(
@@ -279,27 +275,22 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('¡Paseo programado exitosamente!'),
+            content: Text('Listo, paseo programado.'),
             backgroundColor: AppColors.success,
           ),
         );
         Navigator.pop(context);
       }
     } on TimeoutException {
-      // Manejar timeout - los datos se guardaron localmente
-      // Invalidar providers para refrescar la lista de paseos (incluyendo los locales)
-      // Usar un pequeño delay para asegurar que Firestore haya actualizado su caché local
+      // Guardó local; refrescamos la lista igual
       final formState = ref.read(scheduleWalkFormControllerProvider);
       Future.delayed(const Duration(milliseconds: 300), () {
-        // Invalidar provider de la fecha seleccionada
         ref.invalidate(walksByDateProvider(
           WalksByDateParams(paseadorId: user.uid, date: formState.selectedDate),
         ));
-        // Invalidar provider de todos los estados para la fecha seleccionada
         ref.invalidate(walksByDateAllStatusProvider(
           WalksByDateParams(paseadorId: user.uid, date: formState.selectedDate),
         ));
-        // Si la fecha seleccionada es diferente a hoy, también invalidar hoy
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
         final selectedDateNormalized = DateTime(
@@ -317,7 +308,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Paseo guardado localmente. Se sincronizará cuando haya conexión.'),
+            content: Text('Paseo guardado. Se subirá cuando haya conexión.'),
             backgroundColor: AppColors.warning,
             duration: const Duration(seconds: 3),
           ),
@@ -325,40 +316,13 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
         Navigator.pop(context);
       }
     } catch (e) {
-      // Verificar si es un error de red (offline)
-      final errorMessage = e.toString().toLowerCase();
-      if (errorMessage.contains('network') || 
-          errorMessage.contains('unavailable') ||
-          errorMessage.contains('deadline') ||
-          errorMessage.contains('connection')) {
-        // Invalidar providers para refrescar la lista de paseos (incluyendo los locales)
-        // Usar un pequeño delay para asegurar que Firestore haya actualizado su caché local
-        final formState = ref.read(scheduleWalkFormControllerProvider);
-        Future.delayed(const Duration(milliseconds: 300), () {
-          ref.invalidate(walksByDateProvider(
-            WalksByDateParams(paseadorId: user.uid, date: formState.selectedDate),
-          ));
-        });
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Sin conexión. El paseo se guardó localmente y se sincronizará automáticamente cuando haya internet.'),
-              backgroundColor: AppColors.warning,
-              duration: Duration(seconds: 3),
-            ),
-          );
-          Navigator.pop(context);
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: ${e.toString()}'),
-              backgroundColor: AppColors.error,
-            ),
-          );
-        }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Pasó algo: ${e.toString()}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
       }
     }
   }
@@ -391,7 +355,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
             ],
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
@@ -408,7 +372,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo
+                // Ícono
                 Image.asset(
                   'images/dog.png',
                   width: 40,
@@ -427,27 +391,27 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
                 ),
                 const SizedBox(height: 24),
 
-                // Bloque 1: Fecha
+                // Fecha
                 _buildDateInput(),
 
                 const SizedBox(height: 12),
 
-                // Bloque 2: Horario de Inicio
+                // Hora inicio
                 _buildHoraInicioInput(paseadorId),
 
                 const SizedBox(height: 12),
 
-                // Bloque 3: Horario de Fin
+                // Hora fin
                 _buildHoraFinInput(),
 
                 const SizedBox(height: 12),
 
-                // Bloque 4: Perro
+                // Perro
                 _buildPetInput(paseadorId),
 
                 const SizedBox(height: 12),
 
-                // Bloque 5: Lugar de Recojo
+                // Lugar de recojo
                 AppInput(
                   icon: Icons.location_on_outlined,
                   label: 'Lugar de Recojo',
@@ -457,7 +421,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
 
                 const SizedBox(height: 12),
 
-                // Bloque 6: Precio del Paseo
+                // Precio del paseo
                 AppInput(
                   icon: Icons.attach_money,
                   label: 'Precio del Paseo',
@@ -467,7 +431,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
                     if (value != null && value.isNotEmpty) {
                       final precio = double.tryParse(value);
                       if (precio == null || precio < 0) {
-                        return 'Ingresa un precio válido';
+                        return 'Poné un precio válido (número).';
                       }
                     }
                     return null;
@@ -476,7 +440,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
 
                 const SizedBox(height: 16),
 
-                // Botón de guardar
+                // Guardar
                 AppButton(
                   text: 'PROGRAMAR PASEO',
                   onPressed: _handleScheduleWalk,
@@ -526,24 +490,44 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
     final user = authState.value;
     final paseadorIdValue = user?.uid ?? '';
 
-    // Obtener paseos existentes para la fecha
+    // Riverpod: paseos del día seleccionado (solo día, sin hora) para no mostrar horarios ocupados.
+    final selectedDay = DateTime(formState.selectedDate.year, formState.selectedDate.month, formState.selectedDate.day);
     final walksAsync = ref.watch(walksByDateProvider(
-      WalksByDateParams(paseadorId: paseadorIdValue, date: formState.selectedDate),
+      WalksByDateParams(paseadorId: paseadorIdValue, date: selectedDay),
     ));
 
     return walksAsync.when(
       data: (walks) {
-        // Calcular disponibilidad
+        final now = DateTime.now();
+        final todayStart = DateTime(now.year, now.month, now.day);
+        final selectedStart = DateTime(
+          formState.selectedDate.year,
+          formState.selectedDate.month,
+          formState.selectedDate.day,
+        );
+        final isToday = selectedStart.isAtSameMomentAs(todayStart);
+
+        // Rango completo 07:00–22:30. Partir del rango total y quedarse solo con los que tienen disponibilidad.
+        final fechaDia = DateTime(selectedStart.year, selectedStart.month, selectedStart.day);
         final disponibilidad = ScheduleAvailabilityService.calcularDisponibilidad(
           paseosExistentes: walks,
-          fecha: formState.selectedDate,
+          fecha: fechaDia,
         );
-
-        // Filtrar solo los horarios disponibles
-        final horariosDisponibles = disponibilidad
+        final disponiblesSet = disponibilidad
             .where((h) => h.disponible)
             .map((h) => h.horaInicio)
+            .toSet();
+        var horariosDisponibles = ScheduleAvailabilityService.generarHorariosInicio()
+            .where((h) => disponiblesSet.contains(h))
             .toList();
+
+        // Solo cuando es fecha actual: habilitar únicamente horarios posteriores a la hora actual.
+        if (isToday) {
+          final nowMinutes = now.hour * 60 + now.minute;
+          horariosDisponibles = horariosDisponibles
+              .where((h) => ScheduleAvailabilityService.horaAMinutos(h) > nowMinutes)
+              .toList();
+        }
 
         if (horariosDisponibles.isEmpty) {
           return DropdownButtonFormField<String>(
@@ -580,15 +564,20 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
           );
         }
 
+        // Si la hora seleccionada ya no está en la lista (ej. 07:00 y ahora es de noche), valor en blanco.
+        final valorHoraInicio = horariosDisponibles.contains(formState.horaInicio)
+            ? formState.horaInicio
+            : null;
+
         return DropdownButtonFormField<String>(
-          value: formState.horaInicio,
+          value: valorHoraInicio,
           decoration: InputDecoration(
             labelText: 'Hora de Inicio',
             labelStyle: TextStyle(
-              color: formState.horaInicio == null
+              color: valorHoraInicio == null
                   ? Colors.grey.shade500
                   : AppColors.button.withOpacity(0.8),
-              fontSize: formState.horaInicio == null ? 16 : 12,
+              fontSize: valorHoraInicio == null ? 16 : 12,
               fontWeight: FontWeight.w500,
             ),
             floatingLabelBehavior: FloatingLabelBehavior.auto,
@@ -736,34 +725,55 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       );
     }
 
-    // Obtener paseos existentes para la fecha
+    // Misma fuente Riverpod que hora inicio: paseos del día seleccionado (solo día).
+    final selectedDayFin = DateTime(formState.selectedDate.year, formState.selectedDate.month, formState.selectedDate.day);
     final walksAsync = ref.watch(walksByDateProvider(
-      WalksByDateParams(paseadorId: paseadorId, date: formState.selectedDate),
+      WalksByDateParams(paseadorId: paseadorId, date: selectedDayFin),
     ));
 
     return walksAsync.when(
       data: (walks) {
         final horariosFinCandidatos = _getHorariosFinDisponibles(formState.horaInicio);
-        
-        // Filtrar horarios de fin que no se solapen con paseos existentes
-        final horariosFinDisponibles = horariosFinCandidatos.where((horaFin) {
+
+        final now = DateTime.now();
+        final todayStart = DateTime(now.year, now.month, now.day);
+        final selectedStart = DateTime(
+          formState.selectedDate.year,
+          formState.selectedDate.month,
+          formState.selectedDate.day,
+        );
+        final isToday = selectedStart.isAtSameMomentAs(todayStart);
+
+        // Rango hasta 23:00. Excluir horarios sin disponibilidad (ocupados).
+        var horariosFinDisponibles = horariosFinCandidatos.where((horaFin) {
           return ScheduleAvailabilityService.verificarDisponibilidadHorario(
             paseosExistentes: walks,
-            fecha: formState.selectedDate,
+            fecha: selectedDayFin,
             horaInicio: formState.horaInicio!,
             horaFin: horaFin,
           );
         }).toList();
+        // Solo cuando es fecha actual: solo horarios de fin posteriores a la hora actual.
+        if (isToday) {
+          final nowMinutes = now.hour * 60 + now.minute;
+          horariosFinDisponibles = horariosFinDisponibles
+              .where((h) => ScheduleAvailabilityService.horaAMinutos(h) > nowMinutes)
+              .toList();
+        }
+
+        final valorHoraFin = horariosFinDisponibles.contains(formState.horaFin)
+            ? formState.horaFin
+            : null;
 
         return DropdownButtonFormField<String>(
-          value: formState.horaFin,
+          value: valorHoraFin,
           decoration: InputDecoration(
             labelText: 'Hora de Fin',
             labelStyle: TextStyle(
-              color: formState.horaFin == null
+              color: valorHoraFin == null
                   ? Colors.grey.shade500
                   : AppColors.button.withOpacity(0.8),
-              fontSize: formState.horaFin == null ? 16 : 12,
+              fontSize: valorHoraFin == null ? 16 : 12,
               fontWeight: FontWeight.w500,
             ),
             floatingLabelBehavior: FloatingLabelBehavior.auto,
@@ -882,7 +892,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
       data: (pets) {
         return ownersAsync.when(
           data: (owners) {
-            // Obtener el perro y propietario seleccionados
+            // Perro y propietario del formulario
             Pet? selectedPet;
             Owner? selectedOwner;
 
@@ -898,10 +908,10 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
                   orElse: () => owners.first,
                 );
                 
-                // Cargar automáticamente la dirección del propietario
+                // Si el propietario tiene dirección, la cargamos
                 final direccionPropietario = selectedOwner.direccion;
                 if (direccionPropietario != null && direccionPropietario.isNotEmpty) {
-                  // Solo actualizar si el campo está vacío o si el usuario no lo ha modificado manualmente
+                  // Solo si no tocó la dirección a mano
                   if (_direccionController.text.isEmpty || 
                       _direccionController.text == formStateCanino.lastLoadedDireccion) {
                     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -964,7 +974,7 @@ class _ScheduleWalkPageState extends ConsumerState<ScheduleWalkPage> {
                   onChanged: (value) {
                     final controller = ref.read(scheduleWalkFormControllerProvider.notifier);
                     controller.setSelectedCaninoId(value);
-                    // Limpiar la dirección cuando cambia el perro
+                    // Al cambiar el perro limpiamos la dirección
                     _direccionController.clear();
                     controller.clearLastLoadedDireccion();
                   },

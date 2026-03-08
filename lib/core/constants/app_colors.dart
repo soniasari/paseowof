@@ -1,32 +1,27 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // Color principal
+  // principal (morado)
   static const Color primary = Color(0xFF6a4c8d);
-  
-  // Color para botones
-  static const Color button = Color(0xFF0A8F68);
-  
-  // Color secundario/claro
+
+  // botones y acentos verdes
+  static const Color button = Color(0xFF10A37F);
+
   static const Color secondary = Color(0xFFDFF7F1);
-  
-  // Color de acento
+  // fondo de iconos en detalle del paseo (Horario, Recogida, Notas)
+  static const Color iconBackgroundLight = Color(0xFFE7F5F2);
   static const Color accent = Color(0xFFFCEEC4);
-  
-  // Color de fondo
   static const Color background = Color(0xFFF6F6F6);
-  
-  // Color de texto oscuro
+  // home: plomo claro con degradado sutil (~10)
+  static const Color homeGradientTop = Color(0xFFFAFAFA);
+  static const Color homeGradientBottom = Color(0xFFF0F0F0);
   static const Color textDark = Color(0xFF222222);
-  
-  // Color de texto gris
   static const Color textGrey = Color(0xFF777777);
-  
-  // Colores adicionales útiles
   static const Color white = Colors.white;
   static const Color black = Colors.black;
   static const Color error = Colors.red;
-  static const Color success = Colors.green;
+  /// Mensajes de éxito (SnackBar, estados completado): morado, alineado con [primary].
+  static const Color success = Color(0xFF6a4c8d);
   static const Color warning = Colors.orange;
 }
 

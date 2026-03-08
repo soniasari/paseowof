@@ -19,7 +19,7 @@ class OwnersListPage extends ConsumerWidget {
     final ownersAsync = ref.watch(ownersListProvider(paseadorId));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
         title: const Text(
           'Lista de Propietarios',
@@ -29,7 +29,7 @@ class OwnersListPage extends ConsumerWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
@@ -44,7 +44,7 @@ class OwnersListPage extends ConsumerWidget {
               // Header con título y botón
               Container(
                 padding: const EdgeInsets.all(16),
-                color: AppColors.background,
+                color: AppColors.white,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,
@@ -165,9 +165,6 @@ class OwnersListPage extends ConsumerWidget {
   Widget _buildOwnerCard(BuildContext context, WidgetRef ref, Owner owner, String paseadorId) {
     final petsAsync = ref.watch(petsListProvider(paseadorId));
     
-    // Obtener inicial del nombre para el avatar
-    final initial = owner.nombre.isNotEmpty ? owner.nombre[0].toUpperCase() : '?';
-    
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
@@ -184,22 +181,16 @@ class OwnersListPage extends ConsumerWidget {
         children: [
           Row(
             children: [
-              // Avatar circular con inicial
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: Text(
-                    initial,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.white,
-                    ),
+              CircleAvatar(
+                radius: 24,
+                backgroundColor: const Color(0xFFF5F0E6),
+                child: ClipOval(
+                  child: Image.asset(
+                    'images/dueno.png',
+                    width: 48,
+                    height: 48,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Icon(Icons.person, size: 28, color: AppColors.button),
                   ),
                 ),
               ),

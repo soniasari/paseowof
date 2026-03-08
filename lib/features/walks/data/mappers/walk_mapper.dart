@@ -1,7 +1,7 @@
 import '../../domain/entities/walk.dart';
 
 class WalkMapper {
-  // Convertir entidad a Map para Firestore
+  // Pasamos la entidad a mapa para guardar en Firestore
   static Map<String, dynamic> toMap(Walk walk) {
     return {
       'paseadorId': walk.paseadorId,
@@ -21,7 +21,7 @@ class WalkMapper {
     };
   }
 
-  // Convertir Map de Firestore a entidad
+  // Leemos el mapa que viene de Firestore y armamos la entidad Walk
   static Walk fromMap(String id, Map<String, dynamic> map) {
     return Walk(
       id: id,

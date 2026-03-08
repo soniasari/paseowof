@@ -10,7 +10,7 @@ class AppTheme {
         secondary: AppColors.secondary,
         tertiary: AppColors.accent,
         surface: AppColors.white,
-        background: AppColors.background,
+        background: AppColors.white,
         error: AppColors.error,
         onPrimary: AppColors.white,
         onSecondary: AppColors.textDark,
@@ -18,7 +18,7 @@ class AppTheme {
         onBackground: AppColors.textDark,
         onError: AppColors.white,
       ),
-      scaffoldBackgroundColor: AppColors.background,
+      scaffoldBackgroundColor: AppColors.white,
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.primary,
         foregroundColor: AppColors.white,

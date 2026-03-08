@@ -9,7 +9,6 @@ import 'package:paseowof/features/owners_pets/domain/entities/pet.dart';
 import 'package:paseowof/features/owners_pets/domain/entities/owner.dart';
 import 'package:paseowof/features/owners_pets/presentation/providers/owner_pet_providers.dart';
 import 'package:paseowof/features/auth/presentation/providers/auth_providers.dart';
-import 'controllers/walks_controller.dart';
 import 'controllers/reschedule_walk_form_controller.dart';
 import 'providers/walks_providers.dart';
 import 'utils/schedule_availability_service.dart';
@@ -36,12 +35,12 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
   @override
   void initState() {
     super.initState();
-    // Inicializar campos de texto directamente
+    // Cargamos los datos del paseo en los campos
     _direccionController.text = widget.walk.direccionRecogida ?? '';
     _precioController.text = widget.walk.precio?.toString() ?? '';
     _fechaController.text = '${widget.walk.fechaPaseo.day.toString().padLeft(2, '0')}/${widget.walk.fechaPaseo.month.toString().padLeft(2, '0')}/${widget.walk.fechaPaseo.year}';
     
-    // Inicializar el estado del formulario después de que el widget esté completamente construido
+    // Cuando ya esté pintada la pantalla, armamos el estado del formulario
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _initializeFromWalk();
@@ -53,15 +52,15 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
     try {
       final controller = ref.read(rescheduleWalkFormControllerProvider(widget.walk.fechaPaseo).notifier);
       
-      // Actualizar el estado de forma segura
+      // Actualizamos fecha, hora inicio y fin
       controller.setSelectedDate(widget.walk.fechaPaseo);
       controller.setHoraInicio(widget.walk.horaInicio);
       controller.setHoraFin(widget.walk.horaFin);
       
-      // Cargar el canino del paseo
+      // Traemos el canino de este paseo
       _loadWalkPets(controller);
     } catch (e) {
-      // Si hay un error, intentar de nuevo en el siguiente frame
+      // Si falla, probamos de nuevo en el siguiente frame
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           try {
@@ -71,7 +70,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
             controller.setHoraFin(widget.walk.horaFin);
             _loadWalkPets(controller);
           } catch (_) {
-            // Ignorar errores en el segundo intento
+            // Si falla de nuevo, no hacemos nada
           }
         }
       });
@@ -90,7 +89,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
             controller.setSelectedCaninoId(walkPets.first.caninoId);
           }
         } catch (e) {
-          // Ignorar errores al cargar los pets del paseo
+          // Si falla al cargar los caninos, seguimos igual
         }
       }
     });
@@ -121,8 +120,12 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
         final controller = ref.read(rescheduleWalkFormControllerProvider(widget.walk.fechaPaseo).notifier);
         controller.setSelectedDate(picked);
         _fechaController.text = '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
+        final user = ref.read(authControllerProvider).value;
+        if (user != null) {
+          final day = DateTime(picked.year, picked.month, picked.day);
+          ref.invalidate(walksByDateProvider(WalksByDateParams(paseadorId: user.uid, date: day)));
+        }
       } catch (e) {
-        // Si hay un error, solo actualizar el texto del controlador
         _fechaController.text = '${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}';
       }
     }
@@ -133,7 +136,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       final controller = ref.read(rescheduleWalkFormControllerProvider(widget.walk.fechaPaseo).notifier);
       controller.setHoraInicio(horaInicio);
     } catch (e) {
-      // Ignorar errores al actualizar el estado
+      // Si falla no hacemos nada
     }
   }
 
@@ -142,7 +145,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       final controller = ref.read(rescheduleWalkFormControllerProvider(widget.walk.fechaPaseo).notifier);
       controller.setHoraFin(horaFin);
     } catch (e) {
-      // Ignorar errores al actualizar el estado
+      // Si falla no hacemos nada
     }
   }
 
@@ -156,8 +159,9 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
     final minutoInicioInt = partesInicio.length > 1 ? int.parse(partesInicio[1]) : 0;
     final inicioTotalMinutos = horaInicioInt * 60 + minutoInicioInt;
     
+    // Horarios de fin cada 30 min, desde media hora después del inicio hasta las 23:00.
     final horariosFin = <String>[];
-    for (int minutos = inicioTotalMinutos + 30; minutos <= 19 * 60; minutos += 30) {
+    for (int minutos = inicioTotalMinutos + 30; minutos <= 23 * 60; minutos += 30) {
       final hora = minutos ~/ 60;
       final minuto = minutos % 60;
       horariosFin.add('${hora.toString().padLeft(2, '0')}:${minuto.toString().padLeft(2, '0')}');
@@ -175,7 +179,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Completa todos los campos requeridos'),
+            content: Text('Faltan datos, completá todos los campos.'),
             backgroundColor: AppColors.error,
           ),
         );
@@ -183,7 +187,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       return;
     }
 
-    // Obtener datos del perro y propietario
+    // Traemos perro y propietario
     final petsAsync = ref.read(petsListProvider(user.uid));
     final pets = petsAsync.value ?? [];
     if (pets.isEmpty) {
@@ -222,7 +226,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       orElse: () => owners.first,
     );
 
-    // Calcular duración en minutos
+    // Cuántos minutos dura el paseo
     final partesInicio = formState.horaInicio!.split(':');
     final partesFin = formState.horaFin!.split(':');
     final inicioMinutes = int.parse(partesInicio[0]) * 60 + int.parse(partesInicio[1]);
@@ -241,14 +245,14 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       return;
     }
 
-    // Verificar disponibilidad final antes de guardar (excluyendo el paseo actual)
+    // Revisamos si el horario está libre (sin contar este mismo paseo)
     final repository = ref.read(walksRepositoryProvider);
     final walksExistentes = await repository.getWalksByPaseadorIdAndDate(
       user.uid,
       formState.selectedDate,
     );
 
-    // Filtrar el paseo actual de la lista para la validación
+    // Excluimos este paseo; misma regla que programar: solapamiento y margen 30 min tras cada paseo.
     final walksParaValidar = walksExistentes.where((w) => w.id != widget.walk.id).toList();
 
     final estaDisponible = ScheduleAvailabilityService.verificarDisponibilidadHorario(
@@ -270,9 +274,8 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       return;
     }
 
-    // Reprogramar el paseo
     try {
-      // Parsear precio (aceptar coma o punto como decimal)
+      // Precio: aceptamos coma o punto (ej. 25,5 o 25.5)
       double? precio;
       if (_precioController.text.trim().isNotEmpty) {
         final precioStr = _precioController.text.trim().replaceAll(',', '.');
@@ -281,7 +284,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Ingresa un precio válido'),
+                content: Text('Poné un precio válido (número).'),
                 backgroundColor: AppColors.error,
               ),
             );
@@ -290,7 +293,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
         }
       }
 
-      // Obtener nombres de los caninos
+      // Nombres de los caninos del paseo
       final walkPetsAsync = ref.read(walkPetsProvider(
         WalkPetsParams(paseadorId: widget.paseadorId, walkId: widget.walk.id),
       ));
@@ -362,7 +365,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('¡Paseo reprogramado exitosamente!'),
+            content: Text('Listo, paseo reprogramado.'),
             backgroundColor: AppColors.success,
           ),
         );
@@ -416,7 +419,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Paseo guardado localmente. Se sincronizará cuando haya conexión.'),
+            content: Text('Paseo guardado. Se subirá cuando haya conexión.'),
             backgroundColor: AppColors.warning,
             duration: Duration(seconds: 3),
           ),
@@ -476,7 +479,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Sin conexión. El paseo se guardó localmente y se sincronizará automáticamente cuando haya internet.'),
+              content: Text('Sin conexión. El paseo quedó guardado y se subirá cuando haya internet.'),
               backgroundColor: AppColors.warning,
               duration: Duration(seconds: 3),
             ),
@@ -524,7 +527,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
             ],
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
@@ -599,7 +602,7 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
                     if (value != null && value.isNotEmpty) {
                       final precio = double.tryParse(value);
                       if (precio == null || precio < 0) {
-                        return 'Ingresa un precio válido';
+                        return 'Poné un precio válido (número).';
                       }
                     }
                     return null;
@@ -694,34 +697,78 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       );
     }
 
+    // Fecha del día seleccionado (sin hora) para pedir paseos y calcular disponibilidad.
+    final selectedDay = DateTime(formState.selectedDate.year, formState.selectedDate.month, formState.selectedDate.day);
     final walksAsync = ref.watch(walksByDateProvider(
-      WalksByDateParams(paseadorId: paseadorIdValue, date: formState.selectedDate),
+      WalksByDateParams(paseadorId: paseadorIdValue, date: selectedDay),
     ));
 
     return walksAsync.when(
       data: (walks) {
-        // Filtrar el paseo actual de la lista para la validación
-        final walksParaValidar = walks.where((w) => w.id != widget.walk.id).toList();
+        final now = DateTime.now();
+        final todayStart = DateTime(now.year, now.month, now.day);
+        final selectedStart = DateTime(
+          formState.selectedDate.year,
+          formState.selectedDate.month,
+          formState.selectedDate.day,
+        );
+        final isToday = selectedStart.isAtSameMomentAs(todayStart);
 
+        // Rango completo 07:00–22:30. Partir del rango total y quedarse solo con los que tienen disponibilidad.
+        final walksParaValidar = walks.where((w) => w.id != widget.walk.id).toList();
         final disponibilidad = ScheduleAvailabilityService.calcularDisponibilidad(
           paseosExistentes: walksParaValidar,
-          fecha: formState.selectedDate,
+          fecha: selectedDay,
         );
-
-        final horariosDisponibles = disponibilidad
+        final disponiblesSet = disponibilidad
             .where((h) => h.disponible)
             .map((h) => h.horaInicio)
+            .toSet();
+        var horariosDisponibles = ScheduleAvailabilityService.generarHorariosInicio()
+            .where((h) => disponiblesSet.contains(h))
             .toList();
 
-        // Si el horario actual está disponible, incluirlo
+        // Solo cuando es fecha actual: habilitar únicamente horarios posteriores a la hora actual.
+        final nowMinutes = now.hour * 60 + now.minute;
+        if (isToday) {
+          horariosDisponibles = horariosDisponibles
+              .where((h) => ScheduleAvailabilityService.horaAMinutos(h) > nowMinutes)
+              .toList();
+        }
+        // Solo mostrar horas de inicio que tengan al menos una hora de fin válida (evita "No hay horarios disponibles").
+        horariosDisponibles = horariosDisponibles.where((horaInicio) {
+          final candidatosFin = _getHorariosFinDisponibles(horaInicio);
+          return candidatosFin.any((horaFin) =>
+                ScheduleAvailabilityService.verificarDisponibilidadHorario(
+                  paseosExistentes: walksParaValidar,
+                  fecha: selectedDay,
+                  horaInicio: horaInicio,
+                  horaFin: horaFin,
+                ));
+        }).toList();
+        // Si el horario actual del paseo no está en la lista pero tiene al menos un fin válido (y si es hoy, que sea posterior a ahora), incluirlo.
         if (formState.horaInicio != null && !horariosDisponibles.contains(formState.horaInicio)) {
-          horariosDisponibles.add(formState.horaInicio!);
-          horariosDisponibles.sort();
+          if (isToday && ScheduleAvailabilityService.horaAMinutos(formState.horaInicio!) <= nowMinutes) {
+            // No añadir: ya pasó.
+          } else {
+            final candidatosFin = _getHorariosFinDisponibles(formState.horaInicio);
+            final tieneFinValido = candidatosFin.any((horaFin) =>
+                ScheduleAvailabilityService.verificarDisponibilidadHorario(
+                    paseosExistentes: walksParaValidar,
+                    fecha: selectedDay,
+                    horaInicio: formState.horaInicio!,
+                    horaFin: horaFin,
+                  ));
+            if (tieneFinValido) {
+              horariosDisponibles.add(formState.horaInicio!);
+              horariosDisponibles.sort();
+            }
+          }
         }
 
         if (horariosDisponibles.isEmpty) {
           return DropdownButtonFormField<String>(
-            value: formState.horaInicio,
+            value: null,
             decoration: InputDecoration(
               labelText: 'Hora de Inicio',
               labelStyle: TextStyle(
@@ -754,15 +801,20 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
           );
         }
 
+        // Si la hora seleccionada ya no está en la lista filtrada (ej. se tenía 07:00 y ahora es de noche), valor en blanco.
+        final valorHoraInicio = horariosDisponibles.contains(formState.horaInicio)
+            ? formState.horaInicio
+            : null;
+
         return DropdownButtonFormField<String>(
-          value: formState.horaInicio,
+          value: valorHoraInicio,
           decoration: InputDecoration(
             labelText: 'Hora de Inicio',
             labelStyle: TextStyle(
-              color: formState.horaInicio == null
+              color: valorHoraInicio == null
                   ? Colors.grey.shade500
                   : AppColors.button.withOpacity(0.8),
-              fontSize: formState.horaInicio == null ? 16 : 12,
+              fontSize: valorHoraInicio == null ? 16 : 12,
               fontWeight: FontWeight.w500,
             ),
             floatingLabelBehavior: FloatingLabelBehavior.auto,
@@ -952,41 +1004,56 @@ class _RescheduleWalkPageState extends ConsumerState<RescheduleWalkPage> {
       );
     }
 
+    final selectedDayFin = DateTime(formState.selectedDate.year, formState.selectedDate.month, formState.selectedDate.day);
     final walksAsync = ref.watch(walksByDateProvider(
-      WalksByDateParams(paseadorId: paseadorIdValue, date: formState.selectedDate),
+      WalksByDateParams(paseadorId: paseadorIdValue, date: selectedDayFin),
     ));
 
     return walksAsync.when(
       data: (walks) {
         final horariosFinCandidatos = _getHorariosFinDisponibles(formState.horaInicio);
-        
-        // Filtrar el paseo actual de la lista para la validación
+
+        final now = DateTime.now();
+        final todayStart = DateTime(now.year, now.month, now.day);
+        final selectedStart = DateTime(
+          formState.selectedDate.year,
+          formState.selectedDate.month,
+          formState.selectedDate.day,
+        );
+        final isToday = selectedStart.isAtSameMomentAs(todayStart);
+
+        // Rango hasta 23:00. Excluir horarios sin disponibilidad (ocupados); excluimos este paseo.
         final walksParaValidar = walks.where((w) => w.id != widget.walk.id).toList();
-        
-        final horariosFinDisponibles = horariosFinCandidatos.where((horaFin) {
+        var horariosFinDisponibles = horariosFinCandidatos.where((horaFin) {
           return ScheduleAvailabilityService.verificarDisponibilidadHorario(
             paseosExistentes: walksParaValidar,
-            fecha: formState.selectedDate,
+            fecha: selectedDayFin,
             horaInicio: formState.horaInicio!,
             horaFin: horaFin,
           );
         }).toList();
-
-        // Si el horario actual está disponible, incluirlo
-        if (formState.horaFin != null && !horariosFinDisponibles.contains(formState.horaFin)) {
-          horariosFinDisponibles.add(formState.horaFin!);
-          horariosFinDisponibles.sort();
+        // Solo cuando es fecha actual: solo horarios de fin posteriores a la hora actual.
+        if (isToday) {
+          final nowMinutes = now.hour * 60 + now.minute;
+          horariosFinDisponibles = horariosFinDisponibles
+              .where((h) => ScheduleAvailabilityService.horaAMinutos(h) > nowMinutes)
+              .toList();
         }
 
+        // Si la hora seleccionada ya no está en la lista filtrada, valor en blanco para que el usuario elija de nuevo.
+        final valorHoraFin = horariosFinDisponibles.contains(formState.horaFin)
+            ? formState.horaFin
+            : null;
+
         return DropdownButtonFormField<String>(
-          value: formState.horaFin,
+          value: valorHoraFin,
           decoration: InputDecoration(
             labelText: 'Hora de Fin',
             labelStyle: TextStyle(
-              color: formState.horaFin == null
+              color: valorHoraFin == null
                   ? Colors.grey.shade500
                   : AppColors.button.withOpacity(0.8),
-              fontSize: formState.horaFin == null ? 16 : 12,
+              fontSize: valorHoraFin == null ? 16 : 12,
               fontWeight: FontWeight.w500,
             ),
             floatingLabelBehavior: FloatingLabelBehavior.auto,

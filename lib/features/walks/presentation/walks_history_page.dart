@@ -318,7 +318,7 @@ class _WalksHistoryPageState extends ConsumerState<WalksHistoryPage> {
             ],
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(

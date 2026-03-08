@@ -168,7 +168,7 @@ class _EditOwnerPageState extends ConsumerState<EditOwnerPage> {
             ],
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(

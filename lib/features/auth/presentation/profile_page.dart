@@ -15,7 +15,7 @@ class ProfilePage extends ConsumerWidget {
     final authState = ref.watch(authControllerProvider);
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -44,7 +44,7 @@ class ProfilePage extends ConsumerWidget {
             ),
           ],
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         foregroundColor: AppColors.white,
         elevation: 0,
         centerTitle: true,

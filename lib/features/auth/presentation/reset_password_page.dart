@@ -88,7 +88,7 @@ class _ResetPasswordPageState extends ConsumerState<ResetPasswordPage> {
             ],
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(

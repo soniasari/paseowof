@@ -135,7 +135,7 @@ class _WalksByClientPageState extends ConsumerState<WalksByClientPage> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
       ),

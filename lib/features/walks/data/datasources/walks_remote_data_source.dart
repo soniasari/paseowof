@@ -33,13 +33,11 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
           .doc(walk.id)
           .set(walkMap, SetOptions(merge: false));
     } catch (e) {
-      // En modo offline, Firestore puede lanzar errores de red
-      // pero los datos se guardan localmente. Verificamos si es un error de red.
+      // Sin conexión Firestore tira pero guarda local; cuando haya internet sube
       if (e.toString().contains('network') || 
           e.toString().contains('UNAVAILABLE') ||
           e.toString().contains('DEADLINE_EXCEEDED')) {
-        // En modo offline, la escritura se encola y se sincronizará cuando haya conexión
-        // Consideramos esto como éxito porque los datos están guardados localmente
+        // Lo damos por bien guardado (queda en cola local)
         return;
       }
       rethrow;
@@ -49,10 +47,7 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
   @override
   Future<List<Walk>> getWalksByPaseadorIdAndDate(String paseadorId, DateTime date) async {
     try {
-      // Obtener todos los paseos programados y filtrar por fecha en memoria
-      // Usar Source.serverAndCache para incluir datos locales pendientes de sincronización
-      // Esto es crítico para el bloqueo de horarios en modo offline
-      // Si falla, intentar con Source.cache para obtener solo datos locales
+      // Traemos paseos (servidor + caché para que funcione offline); si falla usamos solo caché
       QuerySnapshot<Map<String, dynamic>> snapshot;
       try {
         snapshot = await _firestore
@@ -60,26 +55,24 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
             .where('estado', isEqualTo: 'programado')
             .get(const GetOptions(source: Source.serverAndCache));
       } catch (e) {
-        // Si falla (sin conexión), usar solo caché local
+        // Sin conexión usamos solo lo que hay en caché
         snapshot = await _firestore
             .collection(FirestorePaths.paseosPath(paseadorId))
             .where('estado', isEqualTo: 'programado')
             .get(const GetOptions(source: Source.cache));
       }
 
-      // Normalizar la fecha para comparar solo día, mes y año
-      final targetDate = DateTime(date.year, date.month, date.day);
+      // Comparar solo día/mes/año (evita problemas de zona horaria)
+      final targetYear = date.year;
+      final targetMonth = date.month;
+      final targetDay = date.day;
 
       return snapshot.docs
           .map((doc) => WalkMapper.fromMap(doc.id, doc.data()))
-          .where((walk) {
-            final walkDate = DateTime(
-              walk.fechaPaseo.year,
-              walk.fechaPaseo.month,
-              walk.fechaPaseo.day,
-            );
-            return walkDate.isAtSameMomentAs(targetDate);
-          })
+          .where((walk) =>
+              walk.fechaPaseo.year == targetYear &&
+              walk.fechaPaseo.month == targetMonth &&
+              walk.fechaPaseo.day == targetDay)
           .toList();
     } catch (e) {
       rethrow;
@@ -88,34 +81,29 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
 
   Future<List<Walk>> getWalksByPaseadorIdAndDateAllStatus(String paseadorId, DateTime date) async {
     try {
-      // Obtener todos los paseos (sin filtrar por estado) y filtrar por fecha en memoria
-      // Usar Source.serverAndCache para incluir datos locales pendientes de sincronización
-      // Si falla, intentar con Source.cache para obtener solo datos locales
+      // Igual pero traemos todos los estados (programado, completado, cancelado)
       QuerySnapshot<Map<String, dynamic>> snapshot;
       try {
         snapshot = await _firestore
             .collection(FirestorePaths.paseosPath(paseadorId))
             .get(const GetOptions(source: Source.serverAndCache));
       } catch (e) {
-        // Si falla (sin conexión), usar solo caché local
+        // Sin conexión usamos solo lo que hay en caché
         snapshot = await _firestore
             .collection(FirestorePaths.paseosPath(paseadorId))
             .get(const GetOptions(source: Source.cache));
       }
 
-      // Normalizar la fecha para comparar solo día, mes y año
-      final targetDate = DateTime(date.year, date.month, date.day);
+      final targetYear = date.year;
+      final targetMonth = date.month;
+      final targetDay = date.day;
 
       return snapshot.docs
           .map((doc) => WalkMapper.fromMap(doc.id, doc.data()))
-          .where((walk) {
-            final walkDate = DateTime(
-              walk.fechaPaseo.year,
-              walk.fechaPaseo.month,
-              walk.fechaPaseo.day,
-            );
-            return walkDate.isAtSameMomentAs(targetDate);
-          })
+          .where((walk) =>
+              walk.fechaPaseo.year == targetYear &&
+              walk.fechaPaseo.month == targetMonth &&
+              walk.fechaPaseo.day == targetDay)
           .toList();
     } catch (e) {
       rethrow;
@@ -141,12 +129,12 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
   @override
   Future<List<Walk>> getWalksByPaseadorIdAndDateRange(String paseadorId, DateTime fechaInicio, DateTime fechaFin) async {
     try {
-      // Obtener todos los paseos y filtrar por rango de fechas en memoria
+      // Paseos en un rango de fechas
       final snapshot = await _firestore
           .collection(FirestorePaths.paseosPath(paseadorId))
           .get();
 
-      // Normalizar las fechas para comparar solo día, mes y año
+      // Solo día/mes/año para comparar
       final inicioNormalizado = DateTime(fechaInicio.year, fechaInicio.month, fechaInicio.day);
       final finNormalizado = DateTime(fechaFin.year, fechaFin.month, fechaFin.day).add(const Duration(days: 1)).subtract(const Duration(seconds: 1));
 
@@ -194,13 +182,11 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
           .doc(walkPet.id)
           .set(walkPetMap, SetOptions(merge: false));
     } catch (e) {
-      // En modo offline, Firestore puede lanzar errores de red
-      // pero los datos se guardan localmente. Verificamos si es un error de red.
+      // Sin conexión Firestore tira pero guarda local; cuando haya internet sube
       if (e.toString().contains('network') || 
           e.toString().contains('UNAVAILABLE') ||
           e.toString().contains('DEADLINE_EXCEEDED')) {
-        // En modo offline, la escritura se encola y se sincronizará cuando haya conexión
-        // Consideramos esto como éxito porque los datos están guardados localmente
+        // Lo damos por bien guardado (queda en cola local)
         return;
       }
       rethrow;

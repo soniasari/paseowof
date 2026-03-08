@@ -17,7 +17,7 @@ class OwnersReportPage extends ConsumerWidget {
     final ownersAsync = ref.watch(ownersListProvider(paseadorId));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
         title: const Text(
           'Lista de Propietarios',
@@ -27,7 +27,7 @@ class OwnersReportPage extends ConsumerWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(

@@ -19,7 +19,7 @@ class PetsListPage extends ConsumerWidget {
     final petsAsync = ref.watch(petsListProvider(paseadorId));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
         title: const Text(
           'Registro de Canes',
@@ -29,7 +29,7 @@ class PetsListPage extends ConsumerWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(
@@ -44,7 +44,7 @@ class PetsListPage extends ConsumerWidget {
               // Header con título y botón
               Container(
                 padding: const EdgeInsets.all(16),
-                color: AppColors.background,
+                color: AppColors.white,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   crossAxisAlignment: CrossAxisAlignment.center,

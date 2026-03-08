@@ -15,30 +15,30 @@ import 'features/home/presentation/providers/home_providers.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Inicializar Firebase
+  // Acá inicializamos Firebase con las opciones de la plataforma
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
   
-  // Habilitar persistencia offline solo para Android
+  // En Android activamos la persistencia offline para que funcione sin internet
   if (Platform.isAndroid) {
     try {
       final firestore = FirebaseFirestore.instance;
-      // Configurar persistencia offline ANTES de cualquier operación
+      // Hay que configurar esto antes de tocar Firestore
       firestore.settings = const Settings(
-        persistenceEnabled: true, // Habilitar persistencia offline
-        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED, // Caché ilimitado
+        persistenceEnabled: true,
+        cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
       );
     } catch (e) {
-      // Si la persistencia ya está habilitada, ignorar el error
+      // Si ya estaba habilitada, no hacemos nada
       print('Persistencia offline: $e');
     }
   }
   
-      // Inicializar formato de fecha para español
+      // Formato de fecha.
       await initializeDateFormatting('es_ES', null);
       
-      // Inicializar servicio de notificaciones locales
+      // Servicio de notificaciones locales para los recordatorios de paseo
       await LocalNotificationService().initialize();
       
       runApp(
@@ -72,8 +72,7 @@ class AuthWrapper extends ConsumerWidget {
     return authState.when(
       data: (user) {
         if (user != null) {
-          // Resetear el índice de navegación a 0 (home) cuando se autentica
-          // Esto asegura que siempre se muestre la pantalla de inicio después del login
+          // Después del login volvemos al inicio (índice 0) para que no quede en otra pestaña
           WidgetsBinding.instance.addPostFrameCallback((_) {
             ref.read(homeNavigationControllerProvider.notifier).setIndex(0);
           });

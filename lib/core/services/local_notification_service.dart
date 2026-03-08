@@ -10,18 +10,15 @@ class LocalNotificationService {
   final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
 
-  /// Inicializa el servicio de notificaciones locales
+  /// Arrancamos el servicio de notificaciones (timezone Bolivia, Android e iOS)
   Future<void> initialize() async {
     if (_initialized) return;
 
-    // Inicializar timezone
     tz.initializeTimeZones();
-    tz.setLocalLocation(tz.getLocation('America/La_Paz')); // Zona horaria de Bolivia
+    tz.setLocalLocation(tz.getLocation('America/La_Paz')); // Bolivia
 
-    // Configuración para Android
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     
-    // Configuración para iOS
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
@@ -38,7 +35,7 @@ class LocalNotificationService {
       onDidReceiveNotificationResponse: _onNotificationTapped,
     );
 
-    // Solicitar permisos en Android 13+
+    // Pedir permisos en Android 13+
     if (await _notifications.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>() != null) {
       await _notifications
@@ -50,17 +47,12 @@ class LocalNotificationService {
     _initialized = true;
   }
 
-  /// Maneja cuando se toca una notificación
+  /// Cuando el usuario toca la noti (acá se podría abrir una pantalla)
   void _onNotificationTapped(NotificationResponse response) {
-    // Aquí puedes manejar la navegación cuando se toca la notificación
-    // Por ahora no hacemos nada específico
+    // Por ahora no hacemos nada
   }
 
-  /// Programa una notificación para un paseo
-  /// [walkId] ID único del paseo (se usa como notificationId)
-  /// [title] Título de la notificación
-  /// [body] Cuerpo de la notificación
-  /// [scheduledDate] Fecha y hora en que se debe mostrar la notificación
+  /// Programa una noti para un paseo (walkId = id de la noti, título, cuerpo, fecha/hora)
   Future<void> scheduleWalkNotification({
     required int walkId,
     required String title,
@@ -71,16 +63,13 @@ class LocalNotificationService {
       await initialize();
     }
 
-    // Convertir DateTime a TZDateTime
     final tzScheduledDate = tz.TZDateTime.from(scheduledDate, tz.local);
     final tzAhora = tz.TZDateTime.now(tz.local);
 
-    // Verificar que la fecha no sea en el pasado
     if (tzScheduledDate.isBefore(tzAhora)) {
-      return;
+      return; // No programamos si ya pasó
     }
 
-    // Configuración para Android
     const androidDetails = AndroidNotificationDetails(
       'paseos_channel',
       'Paseos Programados',
@@ -117,26 +106,24 @@ class LocalNotificationService {
     }
   }
 
-  /// Cancela una notificación programada
+  /// Cancela una noti por su id
   Future<void> cancelNotification(int notificationId) async {
     await _notifications.cancel(notificationId);
   }
 
-  /// Cancela todas las notificaciones
+  /// Cancela todas las notis
   Future<void> cancelAllNotifications() async {
     await _notifications.cancelAll();
   }
 
-  /// Verifica si el servicio está inicializado
   bool get isInitialized => _initialized;
 
-  /// Verifica los permisos de notificaciones
+  /// Revisa si tenemos permiso para mostrar notis
   Future<bool> checkPermissions() async {
     if (!_initialized) {
       await initialize();
     }
 
-    // Para Android 13+
     final androidImplementation = await _notifications
         .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
     
@@ -145,7 +132,6 @@ class LocalNotificationService {
       return granted ?? false;
     }
 
-    // Para iOS
     final iosImplementation = await _notifications
         .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>();
     
@@ -158,10 +144,10 @@ class LocalNotificationService {
       return granted ?? false;
     }
 
-    return true; // Asumir que está permitido en otras plataformas
+    return true; // En otras plataformas asumimos que está ok
   }
 
-  /// Obtiene todas las notificaciones programadas pendientes
+  /// Lista de notis que todavía no se mostraron
   Future<List<PendingNotificationRequest>> getPendingNotifications() async {
     if (!_initialized) {
       await initialize();
@@ -169,7 +155,7 @@ class LocalNotificationService {
     return await _notifications.pendingNotificationRequests();
   }
 
-  /// Muestra una notificación de prueba inmediata
+  /// Muestra una noti de prueba al toque
   Future<void> showTestNotification() async {
     if (!_initialized) {
       await initialize();
@@ -203,7 +189,7 @@ class LocalNotificationService {
     );
   }
 
-  /// Programa una notificación de prueba para dentro de X segundos
+  /// Noti de prueba para dentro de X segundos
   Future<void> scheduleTestNotification({int seconds = 5}) async {
     if (!_initialized) {
       await initialize();
@@ -243,7 +229,7 @@ class LocalNotificationService {
     );
   }
 
-  /// Obtiene información de estado del servicio
+  /// Info del servicio (inicializado, permisos, notis pendientes)
   Future<Map<String, dynamic>> getServiceStatus() async {
     if (!_initialized) {
       await initialize();
@@ -264,7 +250,7 @@ class LocalNotificationService {
     };
   }
 
-  /// Programa una notificación para cuando toque el paseo (en la hora de inicio)
+  /// Noti para la hora de inicio del paseo
   Future<void> scheduleWalkStartNotification({
     required String walkId,
     required String propietarioNombre,
@@ -273,13 +259,10 @@ class LocalNotificationService {
     required String horaInicio,
     String? direccion,
   }) async {
-    // Parsear la hora de inicio
     final horaParts = horaInicio.split(':');
     final hora = int.parse(horaParts[0]);
     final minuto = int.parse(horaParts[1]);
 
-    // Crear TZDateTime directamente en la zona horaria local
-    // Esto evita problemas de conversión de zona horaria
     final tzLocal = tz.local;
     final fechaHoraInicio = tz.TZDateTime(
       tzLocal,
@@ -290,13 +273,11 @@ class LocalNotificationService {
       minuto,
     );
 
-    // Usar el hash del walkId como notificationId (convertir string a int)
     final notificationId = walkId.hashCode.abs();
 
     final caninosText = caninoNombres.join(', ');
     final direccionText = direccion != null && direccion.isNotEmpty ? '\n📍 $direccion' : '';
 
-    // Pasar directamente el TZDateTime
     await scheduleWalkNotificationTZ(
       walkId: notificationId,
       title: '🐕 ¡Es hora del paseo!',
@@ -305,7 +286,7 @@ class LocalNotificationService {
     );
   }
 
-  /// Programa una notificación de recordatorio (15 minutos antes)
+  /// Noti de recordatorio 15 min antes del paseo
   Future<void> scheduleWalkReminderNotification({
     required String walkId,
     required String propietarioNombre,
@@ -313,12 +294,10 @@ class LocalNotificationService {
     required DateTime fechaPaseo,
     required String horaInicio,
   }) async {
-    // Parsear la hora de inicio
     final horaParts = horaInicio.split(':');
     final hora = int.parse(horaParts[0]);
     final minuto = int.parse(horaParts[1]);
 
-    // Crear TZDateTime directamente en la zona horaria local
     final tzLocal = tz.local;
     final fechaHoraInicio = tz.TZDateTime(
       tzLocal,
@@ -329,22 +308,16 @@ class LocalNotificationService {
       minuto,
     );
 
-    // Restar 15 minutos para el recordatorio
     final fechaRecordatorio = fechaHoraInicio.subtract(const Duration(minutes: 15));
-
-    // Verificar que el recordatorio no esté en el pasado
     final tzAhora = tz.TZDateTime.now(tz.local);
     
     if (fechaRecordatorio.isBefore(tzAhora)) {
-      return;
+      return; // No programamos si ya pasó
     }
 
-    // Usar el hash del walkId + 1 como notificationId para el recordatorio
     final notificationId = (walkId.hashCode.abs() + 1);
-
     final caninosText = caninoNombres.join(', ');
 
-    // Pasar directamente el TZDateTime
     await scheduleWalkNotificationTZ(
       walkId: notificationId,
       title: '⏰ Recordatorio de Paseo',
@@ -353,8 +326,7 @@ class LocalNotificationService {
     );
   }
 
-  /// Versión mejorada que acepta TZDateTime directamente
-  /// Esto evita problemas de conversión de zona horaria
+  /// Programa la noti con fecha ya en zona horaria (evita líos de conversión)
   Future<void> scheduleWalkNotificationTZ({
     required int walkId,
     required String title,
@@ -367,12 +339,10 @@ class LocalNotificationService {
 
     final tzAhora = tz.TZDateTime.now(tz.local);
 
-    // Verificar que la fecha no sea en el pasado
     if (scheduledDate.isBefore(tzAhora)) {
       return;
     }
 
-    // Configuración para Android
     const androidDetails = AndroidNotificationDetails(
       'paseos_channel',
       'Paseos Programados',
@@ -382,7 +352,6 @@ class LocalNotificationService {
       showWhen: true,
     );
 
-    // Configuración para iOS
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
       presentBadge: true,

@@ -19,7 +19,7 @@ class OwnersPetsReportPage extends ConsumerWidget {
     final petsAsync = ref.watch(petsListProvider(paseadorId));
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
         title: const Text(
           'Propietarios y Mascotas',
@@ -29,7 +29,7 @@ class OwnersPetsReportPage extends ConsumerWidget {
             fontWeight: FontWeight.w600,
           ),
         ),
-        backgroundColor: const Color(0xFF0A8F68),
+        backgroundColor: AppColors.button,
         elevation: 0,
         centerTitle: true,
         leading: IconButton(

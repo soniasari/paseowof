@@ -10,12 +10,11 @@ import '../../features/owners_pets/domain/repositories/owner_pet_repository.dart
 import '../../features/walks/data/datasources/walks_remote_data_source.dart';
 import '../../features/walks/data/repositories/walks_repository_impl.dart';
 import '../../features/walks/domain/repositories/walks_repository.dart';
+import '../../features/walks/domain/use_cases/update_walk_status_use_case.dart';
 
-/// Capa de Inyección de Dependencias
-/// Centraliza la configuración de providers para cumplir con arquitectura limpia
-/// La capa de presentación solo debe depender de esta capa, no directamente de data
+// Dependencias: Firebase, repos. La UI usa esto, no toca data a mano.
 
-// ========== Firebase Providers ==========
+// Firebase
 final firebaseAuthProvider = Provider<FirebaseAuth>((ref) {
   return FirebaseAuth.instance;
 });
@@ -24,7 +23,7 @@ final firebaseFirestoreProvider = Provider<FirebaseFirestore>((ref) {
   return FirebaseFirestore.instance;
 });
 
-// ========== Auth Layer ==========
+// Auth (login, registro, paseador)
 final authRemoteDataSourceProvider = Provider<AuthRemoteDataSource>((ref) {
   final auth = ref.watch(firebaseAuthProvider);
   final firestore = ref.watch(firebaseFirestoreProvider);
@@ -36,7 +35,7 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   return AuthRepositoryImpl(dataSource);
 });
 
-// ========== Owners & Pets Layer ==========
+// Propietarios y caninos
 final ownerPetRemoteDataSourceProvider = Provider<OwnerPetRemoteDataSource>((ref) {
   final firestore = ref.watch(firebaseFirestoreProvider);
   return OwnerPetRemoteDataSourceImpl(firestore: firestore);
@@ -47,7 +46,7 @@ final ownerPetRepositoryProvider = Provider<OwnerPetRepository>((ref) {
   return OwnerPetRepositoryImpl(dataSource);
 });
 
-// ========== Walks Layer ==========
+// Paseos
 final walksRemoteDataSourceProvider = Provider<WalksRemoteDataSource>((ref) {
   final firestore = ref.watch(firebaseFirestoreProvider);
   return WalksRemoteDataSourceImpl(firestore: firestore);
@@ -56,5 +55,11 @@ final walksRemoteDataSourceProvider = Provider<WalksRemoteDataSource>((ref) {
 final walksRepositoryProvider = Provider<WalksRepository>((ref) {
   final dataSource = ref.watch(walksRemoteDataSourceProvider);
   return WalksRepositoryImpl(dataSource);
+});
+
+// Para marcar paseo completado o cancelado
+final updateWalkStatusUseCaseProvider = Provider<UpdateWalkStatusUseCase>((ref) {
+  final repository = ref.watch(walksRepositoryProvider);
+  return UpdateWalkStatusUseCase(repository);
 });
 

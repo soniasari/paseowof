@@ -11,11 +11,13 @@ import 'reports_page.dart';
 import 'providers/home_providers.dart';
 import '../../walks/presentation/schedule_walk_page.dart';
 import '../../walks/presentation/walks_history_page.dart';
-import '../../walks/presentation/reschedule_walk_page.dart';
+import '../../walks/presentation/walk_detail_page.dart';
+import '../../walks/presentation/widgets/cancel_walk_dialog.dart';
 import '../../walks/domain/entities/walk.dart';
 import '../../walks/presentation/providers/walks_providers.dart';
 import '../../owners_pets/presentation/providers/owner_pet_providers.dart';
-import '../../owners_pets/domain/entities/owner.dart';
+import '../../owners_pets/domain/entities/pet.dart';
+import 'package:intl/intl.dart';
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
@@ -25,10 +27,7 @@ class HomePage extends ConsumerWidget {
     final walkerAsync = ref.watch(currentWalkerProvider);
     final currentIndex = ref.watch(homeNavigationControllerProvider);
 
-    // El AuthWrapper ya maneja la navegación automáticamente
-    // No necesitamos verificar aquí para evitar reconstrucciones innecesarias
-
-    // Mostrar diferentes pantallas según el índice seleccionado
+    // Según el tab: inicio, reportes o perfil
     Widget currentScreen;
     switch (currentIndex) {
       case 0:
@@ -45,8 +44,19 @@ class HomePage extends ConsumerWidget {
     }
 
     return Scaffold(
-      backgroundColor: AppColors.background,
-      body: currentScreen,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              AppColors.homeGradientTop,
+              AppColors.homeGradientBottom,
+            ],
+          ),
+        ),
+        child: currentScreen,
+      ),
       bottomNavigationBar: _buildBottomNavigationBar(context, ref),
     );
   }
@@ -58,11 +68,11 @@ class HomePage extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Card de Saludo
+            // Saludo
             _buildWelcomeCard(context, ref, walkerAsync),
             const SizedBox(height: 24),
 
-            // Título "Administración Central"
+            // Título
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 8.0),
               child: Text(
@@ -76,11 +86,11 @@ class HomePage extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
 
-            // Grid de 4 opciones
+            // Las 4 opciones del menú
             _buildOptionsGrid(context, ref),
             const SizedBox(height: 24),
 
-            // Card de Paseos Programados para Hoy
+            // Paseos de hoy
             _buildScheduledWalksCard(context, ref),
           ],
         ),
@@ -96,7 +106,7 @@ class HomePage extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF0A8F68),
+        color: AppColors.button,
         borderRadius: BorderRadius.circular(16),
       ),
       child: walkerAsync.when(
@@ -303,7 +313,7 @@ class HomePage extends ConsumerWidget {
       return const SizedBox.shrink();
     }
 
-    // Normalizar la fecha actual (solo día, mes, año, sin hora)
+    // Solo día/mes/año para comparar con los paseos
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     
@@ -322,15 +332,9 @@ class HomePage extends ConsumerWidget {
         children: [
           Row(
             children: [
-              Image.asset(
-                'images/dog.png',
-                width: 48,
-                height: 48,
-              ),
-              const SizedBox(width: 12),
               const Expanded(
                 child: Text(
-                  'Paseos Programados para Hoy',
+                  'Agenda de Hoy',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -338,37 +342,61 @@ class HomePage extends ConsumerWidget {
                   ),
                 ),
               ),
+              walksAsync.when(
+                data: (walks) {
+                  final pendientes = walks.where((w) => w.estado == 'programado').length;
+                  if (pendientes == 0) return const SizedBox.shrink();
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.secondary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      '$pendientes pendientes',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.button,
+                      ),
+                    ),
+                  );
+                },
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
             ],
           ),
           const SizedBox(height: 16),
           walksAsync.when(
             data: (walks) {
-              // Filtrar solo los paseos con estado "programado"
-              final programados = walks.where((walk) => walk.estado == 'programado').toList();
-              
-              // Ordenar por hora de inicio de manera ascendente
-              programados.sort((a, b) {
-                final horaA = a.horaInicio.split(':');
-                final horaB = b.horaInicio.split(':');
-                final minutosA = int.parse(horaA[0]) * 60 + int.parse(horaA[1]);
-                final minutosB = int.parse(horaB[0]) * 60 + int.parse(horaB[1]);
-                return minutosA.compareTo(minutosB);
-              });
-              
-              if (programados.isEmpty) {
-                return const Text(
-                  'No tienes paseos programados para hoy. ¡No olvides el agua!',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: AppColors.textGrey,
+              final ordenados = List<Walk>.from(walks)
+                ..sort((a, b) {
+                  final minA = _horaAMinutos(a.horaInicio);
+                  final minB = _horaAMinutos(b.horaInicio);
+                  return minA.compareTo(minB);
+                });
+
+              if (ordenados.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    'No tienes paseos programados para hoy. ¡No olvides el agua!',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: AppColors.textGrey,
+                    ),
                   ),
                 );
               }
 
               return Column(
-                children: programados.map((walk) {
-                  return _buildWalkCard(context, ref, walk, user.uid);
-                }).toList(),
+                children: [
+                  for (int i = 0; i < ordenados.length; i++) ...[
+                    if (i > 0) Divider(height: 1, color: Colors.grey.shade300),
+                    _buildWalkRow(context, ref, ordenados[i], user.uid),
+                  ],
+                ],
               );
             },
             loading: () => const Center(
@@ -390,232 +418,161 @@ class HomePage extends ConsumerWidget {
     );
   }
 
-  Widget _buildWalkCard(BuildContext context, WidgetRef ref, Walk walk, String paseadorId) {
-    // Obtener información del propietario y perros
-    final ownersAsync = ref.watch(ownersListProvider(paseadorId));
+  Widget _buildWalkRow(BuildContext context, WidgetRef ref, Walk walk, String paseadorId) {
     final walkPetsAsync = ref.watch(walkPetsProvider(
       WalkPetsParams(paseadorId: paseadorId, walkId: walk.id),
     ));
+    final petsAsync = ref.watch(petsListProvider(paseadorId));
+    final timeStr = _formatHora(walk.horaInicio);
+    final isActive = walk.estado == 'programado';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.secondary.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.secondary.withOpacity(0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Información del paseo
-          Row(
-            children: [
-              Icon(
-                Icons.access_time,
-                size: 16,
-                color: AppColors.textGrey,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${walk.horaInicio} - ${walk.horaFin ?? "N/A"}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDark,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ownersAsync.when(
-            data: (owners) {
-              final owner = owners.firstWhere(
-                (o) => o.id == walk.propietarioId,
-                orElse: () => owners.isNotEmpty ? owners.first : Owner(
-                  id: '',
-                  paseadorId: '',
-                  nombre: 'Propietario no encontrado',
-                  ci: '',
-                  telefono: '',
-                  direccion: '',
-                  email: '',
-                  activo: true,
-                  fechaRegistro: DateTime.now(),
-                ),
-              );
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.person,
-                        size: 16,
-                        color: AppColors.textGrey,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          owner.nombre,
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: AppColors.textDark,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (walk.direccionRecogida != null && walk.direccionRecogida!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: InkWell(
+        onLongPress: walk.estado == 'programado'
+            ? () {
+                showModalBottomSheet(
+                  context: context,
+                  builder: (ctx) => SafeArea(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.location_on,
-                          size: 16,
-                          color: AppColors.textGrey,
+                        ListTile(
+                          leading: const Icon(Icons.check_circle_outline),
+                          title: const Text('Marcar atendido'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _handleMarkAsCompleted(context, ref, walk, paseadorId);
+                          },
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            walk.direccionRecogida!,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.textGrey,
-                            ),
-                          ),
+                        ListTile(
+                          leading: const Icon(Icons.cancel_outlined),
+                          title: const Text('Cancelar paseo'),
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _handleCancelWalk(context, ref, walk, paseadorId);
+                          },
                         ),
                       ],
                     ),
-                  ],
-                ],
-              );
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (error, stack) => const SizedBox.shrink(),
-          ),
-          walkPetsAsync.when(
-            data: (walkPets) {
-              if (walkPets.isEmpty) {
-                return const SizedBox.shrink();
+                  ),
+                );
               }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const SizedBox(height: 8),
-                  Row(
+            : null,
+        child: Row(
+          children: [
+          Expanded(
+            child: walkPetsAsync.when(
+              data: (walkPets) {
+                if (walkPets.isEmpty) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.pets,
-                        size: 16,
-                        color: AppColors.textGrey,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          walkPets.map((wp) => wp.nombreCanino).join(', '),
+                      Text('Paseo', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                      const SizedBox(height: 2),
+                      Text('— • $timeStr', style: const TextStyle(fontSize: 13, color: AppColors.textGrey)),
+                    ],
+                  );
+                }
+                final firstPet = walkPets.first;
+                final nombreMascota = firstPet.nombreCanino;
+                return petsAsync.when(
+                  data: (pets) {
+                    Pet? pet;
+                    try {
+                      pet = pets.firstWhere((p) => p.id == firstPet.caninoId);
+                    } catch (_) {
+                      pet = null;
+                    }
+                    final raza = pet?.raza ?? '—';
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          nombreMascota,
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$raza • $timeStr',
+                          style: const TextStyle(
+                            fontSize: 13,
                             color: AppColors.textGrey,
                           ),
                         ),
-                      ),
+                      ],
+                    );
+                  },
+                  loading: () => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(nombreMascota, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                      Text('— • $timeStr', style: const TextStyle(fontSize: 13, color: AppColors.textGrey)),
                     ],
                   ),
-                ],
-              );
-            },
-            loading: () => const SizedBox.shrink(),
-            error: (error, stack) => const SizedBox.shrink(),
+                  error: (_, __) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(nombreMascota, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                      Text('— • $timeStr', style: const TextStyle(fontSize: 13, color: AppColors.textGrey)),
+                    ],
+                  ),
+                );
+              },
+              loading: () => Text(timeStr, style: const TextStyle(fontSize: 13, color: AppColors.textGrey)),
+              error: (_, __) => Text(timeStr, style: const TextStyle(fontSize: 13, color: AppColors.textGrey)),
+            ),
           ),
-          const SizedBox(height: 12),
-          // Botones de acción
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _handleRescheduleWalk(context, ref, walk, paseadorId),
-                  icon: const Icon(Icons.update, size: 16),
-                  label: const Text(
-                    'Reprogramar',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: AppColors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
+          const SizedBox(width: 8),
+          Material(
+            color: isActive ? AppColors.button.withOpacity(0.2) : const Color(0xFFE0E0E0),
+            shape: const CircleBorder(),
+            elevation: 0,
+            child: InkWell(
+              onTap: isActive ? () => _handleRescheduleWalk(context, ref, walk, paseadorId) : null,
+              customBorder: const CircleBorder(),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Icon(
+                  isActive ? Icons.arrow_forward_ios : Icons.lock,
+                  size: 16,
+                  color: isActive ? AppColors.button : const Color(0xFF9E9E9E),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _handleMarkAsCompleted(context, ref, walk, paseadorId),
-                  icon: const Icon(Icons.check_circle, size: 16),
-                  label: const Text(
-                    'Atendido',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0A8F68),
-                    foregroundColor: AppColors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _handleCancelWalk(context, ref, walk, paseadorId),
-                  icon: const Icon(Icons.cancel, size: 16),
-                  label: const Text(
-                    'Cancelar',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.error,
-                    foregroundColor: AppColors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
+        ),
       ),
     );
+  }
+
+  String _formatHora(String hora) {
+    final partes = hora.split(':');
+    if (partes.length < 2) return hora;
+    final h = int.tryParse(partes[0]) ?? 0;
+    final m = int.tryParse(partes[1]) ?? 0;
+    final dt = DateTime(2000, 1, 1, h, m);
+    return DateFormat('hh:mm a', 'es').format(dt);
   }
 
   Future<void> _handleMarkAsCompleted(BuildContext context, WidgetRef ref, Walk walk, String paseadorId) async {
     if (!context.mounted) return;
 
     try {
-      // Usar el repositorio directamente para evitar problemas con autoDispose
-      final repository = ref.read(walksRepositoryProvider);
-      
-      // Obtener el paseo actual
-      final currentWalk = await repository.getWalkById(paseadorId, walk.id);
-      if (currentWalk == null) {
-        throw Exception('Paseo no encontrado');
-      }
-
-      // Actualizar el estado
-      final updatedWalk = currentWalk.copyWith(
+      await ref.read(walksControllerProvider.notifier).updateWalkStatus(
+        paseadorId: paseadorId,
+        walkId: walk.id,
         estado: 'completado',
-        fechaModificacion: DateTime.now(),
       );
-
-      // Guardar el paseo actualizado
-      await repository.saveWalk(updatedWalk);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -624,8 +581,6 @@ class HomePage extends ConsumerWidget {
             backgroundColor: AppColors.success,
           ),
         );
-        // Invalidar el provider para refrescar la lista después de un microtask
-        // Usar la fecha normalizada (solo día, mes, año) para que coincida con el filtro
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
         Future.microtask(() {
@@ -651,18 +606,18 @@ class HomePage extends ConsumerWidget {
   Future<void> _handleRescheduleWalk(BuildContext context, WidgetRef ref, Walk walk, String paseadorId) async {
     if (!context.mounted) return;
 
-    // Navegar a la página de reprogramación
+    // Va al detalle, ahí se reprograma o cancela
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => RescheduleWalkPage(
+        builder: (context) => WalkDetailPage(
           walk: walk,
           paseadorId: paseadorId,
         ),
       ),
     );
 
-    // Invalidar el provider para refrescar la lista después de un microtask
+    // Refresco la lista
     if (context.mounted) {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
@@ -679,12 +634,11 @@ class HomePage extends ConsumerWidget {
   Future<void> _handleCancelWalk(BuildContext context, WidgetRef ref, Walk walk, String paseadorId) async {
     if (!context.mounted) return;
 
-    // Mostrar diálogo para ingresar motivo de cancelación
     final motivo = await showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return _CancelWalkDialog(
+        return CancelWalkDialog(
           onCancel: () => Navigator.pop(dialogContext, null),
           onConfirm: (motivo) => Navigator.pop(dialogContext, motivo),
         );
@@ -694,24 +648,12 @@ class HomePage extends ConsumerWidget {
     if (motivo == null || !context.mounted) return;
 
     try {
-      // Usar el repositorio directamente para evitar problemas con autoDispose
-      final repository = ref.read(walksRepositoryProvider);
-      
-      // Obtener el paseo actual
-      final currentWalk = await repository.getWalkById(paseadorId, walk.id);
-      if (currentWalk == null) {
-        throw Exception('Paseo no encontrado');
-      }
-
-      // Actualizar el estado con el motivo de cancelación
-      final updatedWalk = currentWalk.copyWith(
+      await ref.read(walksControllerProvider.notifier).updateWalkStatus(
+        paseadorId: paseadorId,
+        walkId: walk.id,
         estado: 'cancelado',
-        fechaModificacion: DateTime.now(),
         motivoCancelacion: motivo,
       );
-
-      // Guardar el paseo actualizado
-      await repository.saveWalk(updatedWalk);
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -720,8 +662,6 @@ class HomePage extends ConsumerWidget {
             backgroundColor: AppColors.error,
           ),
         );
-        // Invalidar el provider para refrescar la lista después de un microtask
-        // Usar la fecha normalizada (solo día, mes, año) para que coincida con el filtro
         final now = DateTime.now();
         final today = DateTime(now.year, now.month, now.day);
         Future.microtask(() {
@@ -793,89 +733,11 @@ class HomePage extends ConsumerWidget {
   }
 }
 
-// Widget separado para el diálogo de cancelación
-class _CancelWalkDialog extends StatefulWidget {
-  final VoidCallback onCancel;
-  final Function(String) onConfirm;
-
-  const _CancelWalkDialog({
-    required this.onCancel,
-    required this.onConfirm,
-  });
-
-  @override
-  State<_CancelWalkDialog> createState() => _CancelWalkDialogState();
-}
-
-class _CancelWalkDialogState extends State<_CancelWalkDialog> {
-  late final TextEditingController _motivoController;
-
-  @override
-  void initState() {
-    super.initState();
-    _motivoController = TextEditingController();
-  }
-
-  @override
-  void dispose() {
-    _motivoController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Cancelar Paseo'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '¿Estás seguro de que deseas cancelar este paseo?',
-              style: TextStyle(fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _motivoController,
-              decoration: const InputDecoration(
-                labelText: 'Motivo de cancelación',
-                hintText: 'Ingresa el motivo de la cancelación',
-                border: OutlineInputBorder(),
-                isDense: true,
-                contentPadding: EdgeInsets.all(12),
-              ),
-              maxLines: 3,
-              textCapitalization: TextCapitalization.sentences,
-              autofocus: true,
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: widget.onCancel,
-          child: const Text('No'),
-        ),
-        TextButton(
-          onPressed: () {
-            final motivoText = _motivoController.text.trim();
-            if (motivoText.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Por favor, ingresa el motivo de cancelación'),
-                  backgroundColor: AppColors.error,
-                  duration: Duration(seconds: 2),
-                ),
-              );
-              return;
-            }
-            widget.onConfirm(motivoText);
-          },
-          child: const Text('Sí, cancelar'),
-        ),
-      ],
-    );
-  }
+int _horaAMinutos(String hora) {
+  final partes = hora.split(':');
+  if (partes.length < 2) return 0;
+  final h = int.tryParse(partes[0]) ?? 0;
+  final m = int.tryParse(partes[1]) ?? 0;
+  return h * 60 + m;
 }
 

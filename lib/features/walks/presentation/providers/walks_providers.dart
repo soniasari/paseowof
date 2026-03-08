@@ -1,31 +1,54 @@
+// =============================================================================
+// WALKS PROVIDERS — Riverpod
+// =============================================================================
+// Centraliza todos los providers del feature de paseos: listas por fecha,
+// detalle por paseo, caninos del paseo, formularios y use cases de dominio.
+// La UI solo consume estos providers; la lógica de negocio está en controllers
+// y use cases inyectados por DI.
+// =============================================================================
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/di/dependency_injection.dart';
 import '../../domain/entities/walk.dart';
 import '../../domain/entities/walk_pet.dart';
 import '../controllers/walk_form_controller.dart';
+import '../controllers/walks_controller.dart';
 
-// Re-exportar providers de DI para mantener compatibilidad
-export '../../../../core/di/dependency_injection.dart' show firebaseFirestoreProvider, walksRepositoryProvider;
+// Re-exportamos desde DI para que el feature de walks dependa solo de este archivo.
+export '../../../../core/di/dependency_injection.dart' show
+    firebaseFirestoreProvider,
+    walksRepositoryProvider,
+    updateWalkStatusUseCaseProvider;
 
-// Provider para obtener la lista de paseos del paseador por fecha (solo programados)
+// -----------------------------------------------------------------------------
+// Listas de paseos (FutureProvider + family para parámetros)
+// -----------------------------------------------------------------------------
+
+/// Paseos del paseador para una fecha dada. Solo estado "programado".
+/// Usado en Home y calendario para mostrar el día.
 final walksByDateProvider = FutureProvider.autoDispose.family<List<Walk>, WalksByDateParams>((ref, params) async {
   final repository = ref.watch(walksRepositoryProvider);
   return await repository.getWalksByPaseadorIdAndDate(params.paseadorId, params.date);
 });
 
-// Provider para obtener la lista de paseos del paseador por fecha (todos los estados)
+/// Paseos del paseador para una fecha, todos los estados (programado, completado, cancelado).
+/// Útil para listados y reportes.
 final walksByDateAllStatusProvider = FutureProvider.autoDispose.family<List<Walk>, WalksByDateParams>((ref, params) async {
   final repository = ref.watch(walksRepositoryProvider);
   return await repository.getWalksByPaseadorIdAndDateAllStatus(params.paseadorId, params.date);
 });
 
-// Provider para obtener la lista de paseos del paseador por rango de fechas
+/// Paseos en un rango de fechas. Usado en historial y reportes por período.
 final walksByDateRangeProvider = FutureProvider.autoDispose.family<List<Walk>, WalksByDateRangeParams>((ref, params) async {
   final repository = ref.watch(walksRepositoryProvider);
   return await repository.getWalksByPaseadorIdAndDateRange(params.paseadorId, params.fechaInicio, params.fechaFin);
 });
 
-// Clase helper para pasar parámetros al provider de rango de fechas
+// -----------------------------------------------------------------------------
+// Parámetros para providers con family (igualdad y hashCode para cache)
+// -----------------------------------------------------------------------------
+
+/// Parámetros del provider de paseos por rango de fechas.
 class WalksByDateRangeParams {
   final String paseadorId;
   final DateTime fechaInicio;
@@ -60,13 +83,13 @@ class WalksByDateRangeParams {
       fechaFin.day.hashCode;
 }
 
-// Provider para obtener los perros de un paseo
+/// Caninos asociados a un paseo (subcolección paseos_caninos). Usado en detalle y reprogramar.
 final walkPetsProvider = FutureProvider.autoDispose.family<List<WalkPet>, WalkPetsParams>((ref, params) async {
   final repository = ref.watch(walksRepositoryProvider);
   return await repository.getWalkPetsByPaseoId(params.paseadorId, params.walkId);
 });
 
-// Clase helper para pasar parámetros al provider
+/// Parámetros del provider de paseos por fecha (día concreto).
 class WalksByDateParams {
   final String paseadorId;
   final DateTime date;
@@ -90,7 +113,7 @@ class WalksByDateParams {
   int get hashCode => paseadorId.hashCode ^ date.year.hashCode ^ date.month.hashCode ^ date.day.hashCode;
 }
 
-// Clase helper para pasar parámetros al provider de walk pets
+/// Parámetros del provider de caninos de un paseo.
 class WalkPetsParams {
   final String paseadorId;
   final String walkId;
@@ -112,14 +135,26 @@ class WalkPetsParams {
   int get hashCode => paseadorId.hashCode ^ walkId.hashCode;
 }
 
-// Provider para el WalkFormController
+// -----------------------------------------------------------------------------
+// Formularios y estado de UI (StateNotifierProvider / StateProvider)
+// -----------------------------------------------------------------------------
+
+/// Controlador del formulario de programar paseo (fecha, horario, canino, etc.).
 final walkFormControllerProvider = StateNotifierProvider.autoDispose<WalkFormController, WalkFormState>((ref) {
   return WalkFormController();
 });
 
-// Providers para el estado del formulario de programar paseo
+/// Estado local del formulario de programar: fecha, propietario, caninos, horario.
 final selectedFechaProvider = StateProvider.autoDispose<DateTime?>((ref) => null);
 final selectedPropietarioIdProvider = StateProvider.autoDispose<String?>((ref) => null);
 final selectedCaninosIdsProvider = StateProvider.autoDispose<List<String>>((ref) => []);
 final selectedCaninoIdProvider = StateProvider.autoDispose<String?>((ref) => null);
 final selectedHorarioProvider = StateProvider.autoDispose<String?>((ref) => null);
+
+/// Controller de paseos: programar, reprogramar y actualizar estado (completado/cancelado).
+/// Depende del repositorio y de [updateWalkStatusUseCaseProvider] inyectado por DI.
+final walksControllerProvider = StateNotifierProvider.autoDispose<WalksController, AsyncValue<void>>((ref) {
+  final repository = ref.watch(walksRepositoryProvider);
+  final updateWalkStatusUseCase = ref.watch(updateWalkStatusUseCaseProvider);
+  return WalksController(repository, updateWalkStatusUseCase);
+});
