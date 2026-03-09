@@ -8,7 +8,9 @@ class FirestorePaths {
   static const String paseos = 'paseos';
   static const String notificaciones = 'notificaciones';
   static const String paseosCaninos = 'paseos_caninos';
-  
+  /// Subcolección de puntos GPS del paseo (15 puntos al finalizar).
+  static const String gpsPointsWalk = 'gps_points_walk';
+
   static String paseador(String paseadorId) => '$paseadores/$paseadorId';
   
   static String propietariosPath(String paseadorId) => 
@@ -32,10 +34,18 @@ class FirestorePaths {
   static String paseosCaninosPath(String paseadorId, String paseoId) => 
       '$paseadores/$paseadorId/$paseos/$paseoId/$paseosCaninos';
   
-  static String paseoCanino(String paseadorId, String paseoId, String paseoCaninoId) => 
+  static String paseoCanino(String paseadorId, String paseoId, String paseoCaninoId) =>
       '$paseadores/$paseadorId/$paseos/$paseoId/$paseosCaninos/$paseoCaninoId';
-  
-  static String notificacionesPath(String paseadorId) => 
+
+  /// Ruta de la subcolección de puntos GPS de un paseo (15 puntos al finalizar).
+  static String gpsPointsWalkPath(String paseadorId, String paseoId) =>
+      '${paseo(paseadorId, paseoId)}/$gpsPointsWalk';
+
+  /// Documento que guarda la ruta (15 puntos) y metadatos del paseo.
+  static String gpsPointsWalkDoc(String paseadorId, String paseoId) =>
+      '${gpsPointsWalkPath(paseadorId, paseoId)}/track';
+
+  static String notificacionesPath(String paseadorId) =>
       '$paseadores/$paseadorId/$notificaciones';
   
   static String notificacion(String paseadorId, String notificacionId) => 

@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Paseowof usa tu ubicación para registrar la ruta del paseo y calcular la distancia.</string>
 </dict>
 </plist>

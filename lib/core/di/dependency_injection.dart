@@ -10,7 +10,11 @@ import '../../features/owners_pets/domain/repositories/owner_pet_repository.dart
 import '../../features/walks/data/datasources/walks_remote_data_source.dart';
 import '../../features/walks/data/repositories/walks_repository_impl.dart';
 import '../../features/walks/domain/repositories/walks_repository.dart';
+import '../../features/walks/domain/use_cases/complete_walk_with_track_use_case.dart';
 import '../../features/walks/domain/use_cases/update_walk_status_use_case.dart';
+import '../../features/walks/data/services/walk_location_stream_service.dart';
+import '../../features/walks/data/services/walk_track_filter_service.dart';
+import '../services/location_permission_service.dart';
 
 // Dependencias: Firebase, repos. La UI usa esto, no toca data a mano.
 
@@ -61,5 +65,23 @@ final walksRepositoryProvider = Provider<WalksRepository>((ref) {
 final updateWalkStatusUseCaseProvider = Provider<UpdateWalkStatusUseCase>((ref) {
   final repository = ref.watch(walksRepositoryProvider);
   return UpdateWalkStatusUseCase(repository);
+});
+
+// Paseo en curso: permisos, flujo de ubicación y filtros
+final locationPermissionServiceProvider = Provider<LocationPermissionService>((ref) {
+  return LocationPermissionService();
+});
+
+final walkLocationStreamServiceProvider = Provider<WalkLocationStreamService>((ref) {
+  return WalkLocationStreamService();
+});
+
+final walkTrackFilterServiceProvider = Provider<WalkTrackFilterService>((ref) {
+  return WalkTrackFilterService();
+});
+
+final completeWalkWithTrackUseCaseProvider = Provider<CompleteWalkWithTrackUseCase>((ref) {
+  final repository = ref.watch(walksRepositoryProvider);
+  return CompleteWalkWithTrackUseCase(repository);
 });
 

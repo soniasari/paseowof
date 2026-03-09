@@ -32,6 +32,14 @@ dependencies:
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
 
+  # Ubicación y permisos (paseo en curso)
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+
+  # Segundo plano solo mientras el GPS del paseo está activo
+  flutter_background_service: ^5.0.5
+  shared_preferences: ^2.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
