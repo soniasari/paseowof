@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/local_notification_service.dart';
+import 'core/services/walk_background_tracking_service.dart';
 import 'features/auth/presentation/login_page.dart';
 import 'features/home/presentation/home_page.dart';
 import 'features/auth/presentation/providers/auth_providers.dart';
@@ -40,7 +41,14 @@ void main() async {
       
       // Servicio de notificaciones locales para los recordatorios de paseo
       await LocalNotificationService().initialize();
-      
+
+      // Servicio en segundo plano para el paseo (solo activo cuando el GPS está en uso)
+      try {
+        await WalkBackgroundTrackingService.initialize();
+      } catch (e) {
+        debugPrint('WalkBackgroundTrackingService.init: $e');
+      }
+
       runApp(
     const ProviderScope(
       child: MyApp(),

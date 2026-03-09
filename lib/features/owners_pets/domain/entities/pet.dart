@@ -35,7 +35,7 @@ class Pet {
     return {
       'paseadorId': paseadorId,
       'propietarioId': propietarioId,
-      'nombre': nombre,
+      'nombreMascota': nombre,
       'raza': raza,
       'edad': edad,
       'tamano': tamano,
@@ -54,7 +54,7 @@ class Pet {
       id: id,
       paseadorId: map['paseadorId'] ?? '',
       propietarioId: map['propietarioId'] ?? '',
-      nombre: map['nombre'] ?? '',
+      nombre: map['nombreMascota'] ?? map['nombre'] ?? '',
       raza: map['raza'],
       edad: map['edad'],
       tamano: map['tamano'],

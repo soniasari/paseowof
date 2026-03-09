@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../../core/constants/firestore_paths.dart';
+import '../../domain/entities/gps_point.dart';
 import '../../domain/entities/walk.dart';
 import '../../domain/entities/walk_pet.dart';
 import '../mappers/walk_mapper.dart';
@@ -15,6 +16,16 @@ abstract class WalksRemoteDataSource {
   Future<void> saveWalkPetToFirestore(String paseadorId, String paseoId, WalkPet walkPet);
   Future<List<WalkPet>> getWalkPetsByPaseoId(String paseadorId, String paseoId);
   Future<void> deleteWalk(String paseadorId, String walkId);
+  /// Persiste los 15 puntos GPS, distancia total y metadatos en la subcolección gps_points_walk.
+  Future<void> saveWalkGpsPoints(
+    String paseadorId,
+    String walkId,
+    List<GpsPoint> points, {
+    required String idPropietario,
+    required List<String> idsMascotas,
+    required String nombreMascota,
+    required double distanciaKm,
+  });
 }
 
 class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
@@ -216,6 +227,39 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
           .doc(walkId)
           .update({'estado': 'cancelado'});
     } catch (e) {
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> saveWalkGpsPoints(
+    String paseadorId,
+    String walkId,
+    List<GpsPoint> points, {
+    required String idPropietario,
+    required List<String> idsMascotas,
+    required String nombreMascota,
+    required double distanciaKm,
+  }) async {
+    try {
+      final ref = _firestore.doc(FirestorePaths.gpsPointsWalkDoc(paseadorId, walkId));
+      final pointsMap = points.map((p) => p.toMap()).toList();
+      final idMascota = idsMascotas.isNotEmpty ? idsMascotas.first : '';
+      await ref.set({
+        'points': pointsMap,
+        'idPaseo': walkId,
+        'idPropietario': idPropietario,
+        'idMascota': idMascota,
+        'idsMascotas': idsMascotas,
+        'nombreMascota': nombreMascota,
+        'distanciaKm': distanciaKm,
+      });
+    } catch (e) {
+      if (e.toString().contains('network') ||
+          e.toString().contains('UNAVAILABLE') ||
+          e.toString().contains('DEADLINE_EXCEEDED')) {
+        return;
+      }
       rethrow;
     }
   }

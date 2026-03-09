@@ -60,6 +60,11 @@ service cloud.firestore {
           // Solo el paseador propietario puede leer y escribir los paseos_caninos
           allow read, write: if isSignedIn() && isOwner(paseadorId);
         }
+        
+        // Subcolección de puntos GPS del paseo (15 puntos al finalizar)
+        match /gps_points_walk/{documentId} {
+          allow read, write: if isSignedIn() && isOwner(paseadorId);
+        }
       }
       
       // Reglas para subcolecciones de notificaciones
