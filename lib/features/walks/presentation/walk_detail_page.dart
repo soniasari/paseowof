@@ -11,7 +11,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../core/di/dependency_injection.dart';
 import '../../../core/services/local_notification_service.dart';
+import '../../../core/services/location_permission_service.dart';
 import '../../owners_pets/domain/entities/owner.dart';
 import '../../owners_pets/domain/entities/pet.dart';
 import '../../owners_pets/presentation/providers/owner_pet_providers.dart';
@@ -19,6 +21,7 @@ import '../domain/entities/walk.dart';
 import '../domain/entities/walk_pet.dart';
 import 'providers/walks_providers.dart';
 import 'reschedule_walk_page.dart';
+import 'walk_in_progress/paseo_en_curso_page.dart';
 import 'widgets/cancel_walk_dialog.dart';
 
 /// Página de detalle de un paseo: datos del canino, dueño, horario y acciones
@@ -48,8 +51,89 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
     return DateFormat('hh:mm a', 'es').format(dt);
   }
 
-  /// Flujo de cancelación del paseo
+  /// Comprueba GPS y permiso de ubicación; si todo está bien, abre "Paseo en curso".
+  Future<void> _handleIniciarPaseo(BuildContext context) async {
+    final permissionService = ref.read(locationPermissionServiceProvider);
+    var result = await permissionService.checkCanTrackLocation();
 
+    if (result == LocationCheckResult.ok) {
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PaseoEnCursoPage(
+            walk: widget.walk,
+            paseadorId: widget.paseadorId,
+          ),
+        ),
+      ).then((_) {
+        setState(() {});
+        ref.invalidate(walksByDateProvider(WalksByDateParams(paseadorId: widget.paseadorId, date: widget.walk.fechaPaseo)));
+        ref.invalidate(walksByDateAllStatusProvider(WalksByDateParams(paseadorId: widget.paseadorId, date: widget.walk.fechaPaseo)));
+      });
+      return;
+    }
+
+    if (result == LocationCheckResult.permissionDenied) {
+      result = await permissionService.requestLocationPermission();
+    }
+
+    if (!mounted) return;
+    if (result == LocationCheckResult.ok) {
+      // Pequeña espera tras conceder permiso para evitar crash al navegar
+      // (el sistema y la actividad necesitan estabilizarse).
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PaseoEnCursoPage(
+            walk: widget.walk,
+            paseadorId: widget.paseadorId,
+          ),
+        ),
+      ).then((_) {
+        if (mounted) {
+          setState(() {});
+          ref.invalidate(walksByDateProvider(WalksByDateParams(paseadorId: widget.paseadorId, date: widget.walk.fechaPaseo)));
+          ref.invalidate(walksByDateAllStatusProvider(WalksByDateParams(paseadorId: widget.paseadorId, date: widget.walk.fechaPaseo)));
+        }
+      });
+      return;
+    }
+
+    final message = result == LocationCheckResult.serviceDisabled
+        ? 'Activa el GPS para registrar la ruta del paseo.'
+        : result == LocationCheckResult.permissionPermanentlyDenied
+            ? 'El permiso de ubicación fue denegado. Actívalo en ajustes para iniciar el paseo.'
+            : 'Se necesita permiso de ubicación para iniciar el paseo.';
+
+    final openSettings = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Ubicación requerida'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Entendido'),
+          ),
+          if (result == LocationCheckResult.permissionPermanentlyDenied ||
+              result == LocationCheckResult.serviceDisabled)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Abrir ajustes'),
+            ),
+        ],
+      ),
+    );
+
+    if (openSettings == true) {
+      await permissionService.openSystemAppSettings();
+    }
+  }
+
+  /// Flujo de cancelación del paseo
   Future<void> _handleCancelWalk() async {
     if (!mounted) return;
     final motivo = await showDialog<String>(
@@ -372,14 +456,7 @@ class _WalkDetailPageState extends ConsumerState<WalkDetailPage> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('En construcción'),
-                      backgroundColor: AppColors.button,
-                    ),
-                  );
-                },
+                onPressed: () => _handleIniciarPaseo(context),
                 icon: const Icon(Icons.play_arrow, size: 20, color: Colors.white),
                 label: const Text(
                   'INICIAR PASEO',

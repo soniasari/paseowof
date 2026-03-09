@@ -5,7 +5,7 @@ class PetMapper {
     return {
       'paseadorId': pet.paseadorId,
       'propietarioId': pet.propietarioId,
-      'nombre': pet.nombre,
+      'nombreMascota': pet.nombre,
       'raza': pet.raza,
       'edad': pet.edad,
       'tamano': pet.tamano,
@@ -24,7 +24,7 @@ class PetMapper {
       id: id,
       paseadorId: map['paseadorId'] ?? '',
       propietarioId: map['propietarioId'] ?? '',
-      nombre: map['nombre'] ?? '',
+      nombre: map['nombreMascota'] ?? map['nombre'] ?? '',
       raza: map['raza'],
       edad: map['edad'],
       tamano: map['tamano'],
