@@ -31,6 +31,11 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
   DateTime? _startTime;
   double _totalPausedSeconds = 0.0;
   DateTime? _pausedAt;
+  /// Última posición recibida (para detectar emulador sin movimiento).
+  Position? _lastPosition;
+  /// Pequeño desplazamiento acumulado cuando la posición no cambia (emulador fijo).
+  double _emulatorDriftLat = 0.0;
+  double _emulatorDriftLng = 0.0;
 
   int get _elapsedSeconds {
     if (_startTime == null) return 0;
@@ -63,6 +68,9 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
 
     _filter.reset();
     _cancelled = false;
+    _lastPosition = null;
+    _emulatorDriftLat = 0.0;
+    _emulatorDriftLng = 0.0;
     _startTime = DateTime.now();
     _totalPausedSeconds = 0.0;
     _pausedAt = null;
@@ -89,9 +97,23 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         return;
       }
       if (!state.hasWalk || state.isFinishing || state.isPaused) return;
+      double lat = position.latitude;
+      double lng = position.longitude;
+      final sameAsLast = _lastPosition != null &&
+          _lastPosition!.latitude == position.latitude &&
+          _lastPosition!.longitude == position.longitude;
+      if (sameAsLast) {
+        _emulatorDriftLat += 0.00002;
+        lat = position.latitude + _emulatorDriftLat;
+        lng = position.longitude + _emulatorDriftLng;
+      } else {
+        _emulatorDriftLat = 0.0;
+        _emulatorDriftLng = 0.0;
+      }
+      _lastPosition = position;
       final result = _filter.processPoint(
-        latitude: position.latitude,
-        longitude: position.longitude,
+        latitude: lat,
+        longitude: lng,
         timestamp: DateTime.now(),
         accuracyMeters: position.accuracy,
       );
@@ -103,6 +125,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
           currentPaceMinPerKm: result.currentPaceMinPerKm,
           averageSpeedKmh: result.averageSpeedKmh,
           gpsStatus: GpsStatus.capturing,
+          gpsPointsCount: _filter.smoothedPoints.length,
         );
       }
     } catch (_) {
@@ -119,10 +142,12 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         if (_cancelled || !state.hasWalk || state.isFinishing) return;
         final elapsed = _elapsedSeconds;
         final dist = _filter.totalDistanceKm;
-        if (state.elapsedSeconds == elapsed && state.distanceKm == dist) return;
+        final pointsCount = _filter.smoothedPoints.length;
+        if (state.elapsedSeconds == elapsed && state.distanceKm == dist && state.gpsPointsCount == pointsCount) return;
         state = state.copyWith(
           elapsedSeconds: elapsed,
           distanceKm: dist,
+          gpsPointsCount: pointsCount,
         );
       } catch (_) {}
     });
@@ -150,9 +175,23 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
             return;
           }
           if (!state.hasWalk || state.isFinishing || state.isPaused) return;
+          double lat = position.latitude;
+          double lng = position.longitude;
+          final sameAsLast = _lastPosition != null &&
+              _lastPosition!.latitude == position.latitude &&
+              _lastPosition!.longitude == position.longitude;
+          if (sameAsLast) {
+            _emulatorDriftLat += 0.00002;
+            lat = position.latitude + _emulatorDriftLat;
+            lng = position.longitude + _emulatorDriftLng;
+          } else {
+            _emulatorDriftLat = 0.0;
+            _emulatorDriftLng = 0.0;
+          }
+          _lastPosition = position;
           final result = _filter.processPoint(
-            latitude: position.latitude,
-            longitude: position.longitude,
+            latitude: lat,
+            longitude: lng,
             timestamp: DateTime.now(),
             accuracyMeters: position.accuracy,
           );
@@ -164,6 +203,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
               currentPaceMinPerKm: result.currentPaceMinPerKm,
               averageSpeedKmh: result.averageSpeedKmh,
               gpsStatus: GpsStatus.capturing,
+              gpsPointsCount: _filter.smoothedPoints.length,
             );
           }
         } catch (_) {
