@@ -30,6 +30,8 @@ class WalkInProgressState {
   final double? currentPaceMinPerKm;
   final double? averageSpeedKmh;
   final String? errorMessage;
+  /// Número de puntos GPS aceptados (para diagnóstico y UI).
+  final int gpsPointsCount;
 
   const WalkInProgressState({
     this.status = WalkInProgressStatus.idle,
@@ -41,6 +43,7 @@ class WalkInProgressState {
     this.currentPaceMinPerKm,
     this.averageSpeedKmh,
     this.errorMessage,
+    this.gpsPointsCount = 0,
   });
 
   bool get isTracking => status == WalkInProgressStatus.tracking;
@@ -58,6 +61,7 @@ class WalkInProgressState {
     double? currentPaceMinPerKm,
     double? averageSpeedKmh,
     String? errorMessage,
+    int? gpsPointsCount,
     bool clearError = false,
   }) {
     return WalkInProgressState(
@@ -70,6 +74,7 @@ class WalkInProgressState {
       currentPaceMinPerKm: currentPaceMinPerKm ?? this.currentPaceMinPerKm,
       averageSpeedKmh: averageSpeedKmh ?? this.averageSpeedKmh,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      gpsPointsCount: gpsPointsCount ?? this.gpsPointsCount,
     );
   }
 }

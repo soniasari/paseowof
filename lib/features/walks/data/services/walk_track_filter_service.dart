@@ -71,6 +71,12 @@ class WalkTrackFilterService {
         latitude.isInfinite || longitude.isInfinite) {
       return FilterResult(accepted: false, totalDistanceKm: _totalDistanceKm);
     }
+    // Evitar timestamps en el futuro (reloj del dispositivo mal configurado): usamos "ahora" como tope.
+    final now = DateTime.now();
+    final safeTimestamp = timestamp.isAfter(now.add(const Duration(seconds: 30)))
+        ? now
+        : timestamp;
+
     // Primeros N puntos se aceptan siempre (emulador y GPS en interior suelen dar mala precisión).
     final acceptAnyway = _smoothedPoints.length < WalkTrackFilterConfig.acceptPointsWithoutAccuracy;
     if (!acceptAnyway &&
@@ -80,14 +86,16 @@ class WalkTrackFilterService {
     }
 
     if (_lastAcceptedTime != null) {
-      final elapsedSec = timestamp.difference(_lastAcceptedTime!).inSeconds;
-      if (elapsedSec < WalkTrackFilterConfig.minIntervalSeconds) {
+      final rawElapsed = safeTimestamp.difference(_lastAcceptedTime!).inSeconds;
+      if (rawElapsed >= 0 && rawElapsed < WalkTrackFilterConfig.minIntervalSeconds) {
         return FilterResult(accepted: false, totalDistanceKm: _totalDistanceKm);
       }
     }
 
-    final lastTime = _lastAcceptedTime ?? timestamp;
-    final elapsedSec = timestamp.difference(lastTime).inSeconds;
+    final lastTime = _lastAcceptedTime ?? safeTimestamp;
+    int elapsedSec = safeTimestamp.difference(lastTime).inSeconds;
+    if (elapsedSec < 0) elapsedSec = WalkTrackFilterConfig.sampleIntervalSeconds;
+    if (elapsedSec > 120) elapsedSec = 120;
 
     if (_lastSmoothedPoint != null) {
       final distKm = _haversineKm(
@@ -114,7 +122,7 @@ class WalkTrackFilterService {
     final newPoint = GpsPoint(
       latitude: smoothedLat,
       longitude: smoothedLng,
-      timestamp: timestamp,
+      timestamp: safeTimestamp,
       accuracy: accuracyMeters,
     );
 
@@ -135,7 +143,7 @@ class WalkTrackFilterService {
 
     _smoothedPoints.add(newPoint);
     _lastSmoothedPoint = newPoint;
-    _lastAcceptedTime = timestamp;
+    _lastAcceptedTime = safeTimestamp;
     _totalDistanceKm += distanceToAdd;
 
     double? pace;
@@ -145,7 +153,9 @@ class WalkTrackFilterService {
       final segmentMin = elapsedSec / 60.0;
       if (segmentKm > 0) pace = segmentMin / segmentKm;
       if (_smoothedPoints.length >= 2) {
-        final totalSec = timestamp.difference(_smoothedPoints.first.timestamp).inSeconds;
+        int totalSec = safeTimestamp.difference(_smoothedPoints.first.timestamp).inSeconds;
+        if (totalSec < 0) totalSec = 0;
+        if (totalSec > 86400) totalSec = 86400;
         if (totalSec > 0 && _totalDistanceKm > 0) {
           avgSpeed = _totalDistanceKm / (totalSec / 3600.0);
         }

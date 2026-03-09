@@ -234,6 +234,17 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                 ),
               ],
             ),
+            if (state.gpsPointsCount > 0) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Puntos: ${state.gpsPointsCount}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textGrey,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
             const SizedBox(height: 32),
             const Text(
               'TIEMPO DE PASEO',
