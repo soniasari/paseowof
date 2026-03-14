@@ -31,7 +31,10 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
   @override
   void initState() {
     super.initState();
+    // Primero pinta la pantalla; luego inicia el seguimiento para evitar ANR al bloquear en la primera lectura GPS.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
       try {
         await ref.read(walkInProgressProvider.notifier).startTracking(widget.walk, widget.paseadorId);
@@ -234,17 +237,6 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                 ),
               ],
             ),
-            if (state.gpsPointsCount > 0) ...[
-              const SizedBox(height: 4),
-              Text(
-                'Puntos: ${state.gpsPointsCount}',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textGrey,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
             const SizedBox(height: 32),
             const Text(
               'TIEMPO DE PASEO',

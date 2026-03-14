@@ -24,17 +24,15 @@ class FilterResult {
   });
 }
 
-/// Constantes de los filtros (negocio y GPS).
-/// Política: posición cada 15 s; solo suma distancia si el tramo es >= deadband (evita ruido).
+/// Constantes de los filtros (según especificación).
+/// Orden: NaN → precisión → intervalo ≥ 3 s → velocidad ≤ 20 km/h → Kalman → deadband.
 class WalkTrackFilterConfig {
   static const double maxAccuracyMeters = 20.0;
   static const double maxSpeedKmh = 20.0;
-  static const int minIntervalSeconds = 10;
-  /// Distancia mínima (m) entre puntos para sumar; 0 = cualquier movimiento suma (emulador y pruebas).
+  static const int minIntervalSeconds = 3;
   static const double deadbandMeters = 0.0;
   static const double kalmanGain = 0.35;
   static const int sampleIntervalSeconds = 15;
-  /// Primeros N puntos se aceptan sin comprobar precisión (emulador suele dar mala precisión).
   static const int acceptPointsWithoutAccuracy = 6;
 }
 
@@ -85,6 +83,7 @@ class WalkTrackFilterService {
       return FilterResult(accepted: false, totalDistanceKm: _totalDistanceKm);
     }
 
+    // Filtro de intervalo mínimo: ≥ 3 s desde el último punto aceptado.
     if (_lastAcceptedTime != null) {
       final rawElapsed = safeTimestamp.difference(_lastAcceptedTime!).inSeconds;
       if (rawElapsed >= 0 && rawElapsed < WalkTrackFilterConfig.minIntervalSeconds) {
@@ -97,6 +96,7 @@ class WalkTrackFilterService {
     if (elapsedSec < 0) elapsedSec = WalkTrackFilterConfig.sampleIntervalSeconds;
     if (elapsedSec > 120) elapsedSec = 120;
 
+    // Filtro de velocidad máxima (outlier): último punto suavizado vs nuevo (crudo); velocidad ≤ 20 km/h.
     if (_lastSmoothedPoint != null) {
       final distKm = _haversineKm(
         _lastSmoothedPoint!.latitude,
@@ -126,6 +126,7 @@ class WalkTrackFilterService {
       accuracy: accuracyMeters,
     );
 
+    // Deadband: entre último suavizado y nuevo suavizado; solo se suma si tramo (m) > deadbandMeters (0 = todo > 0 suma).
     double distanceToAdd = 0.0;
     if (_lastSmoothedPoint != null) {
       final d = _haversineKm(
@@ -137,8 +138,6 @@ class WalkTrackFilterService {
       if (d * 1000.0 > WalkTrackFilterConfig.deadbandMeters) {
         distanceToAdd = d;
       }
-    } else {
-      distanceToAdd = 0.0;
     }
 
     _smoothedPoints.add(newPoint);
@@ -146,27 +145,24 @@ class WalkTrackFilterService {
     _lastAcceptedTime = safeTimestamp;
     _totalDistanceKm += distanceToAdd;
 
+    // Ritmo actual: siempre sobre el tramo ya suavizado por Kalman (distanceToAdd = último suavizado → nuevo suavizado), nunca sobre crudos.
+    // Solo se calcula si el tramo es significativo (>= 20 m) para evitar saltos por ruido residual.
+    const double minSegmentKmForPace = 0.02;
+    const double maxPaceMinPerKm = 60.0;
     double? pace;
-    double? avgSpeed;
-    if (distanceToAdd > 0 && elapsedSec > 0) {
+    if (distanceToAdd > 0 && elapsedSec > 0 && distanceToAdd >= minSegmentKmForPace) {
       final segmentKm = distanceToAdd;
       final segmentMin = elapsedSec / 60.0;
-      if (segmentKm > 0) pace = segmentMin / segmentKm;
-      if (_smoothedPoints.length >= 2) {
-        int totalSec = safeTimestamp.difference(_smoothedPoints.first.timestamp).inSeconds;
-        if (totalSec < 0) totalSec = 0;
-        if (totalSec > 86400) totalSec = 86400;
-        if (totalSec > 0 && _totalDistanceKm > 0) {
-          avgSpeed = _totalDistanceKm / (totalSec / 3600.0);
-        }
-      }
+      final rawPace = segmentMin / segmentKm;
+      pace = rawPace > maxPaceMinPerKm ? maxPaceMinPerKm : rawPace;
     }
+    // Velocidad media la calcula el notifier con distancia/tiempo mostrado para que sea coherente.
 
     return FilterResult(
       accepted: true,
       totalDistanceKm: _totalDistanceKm,
       currentPaceMinPerKm: pace,
-      averageSpeedKmh: avgSpeed,
+      averageSpeedKmh: null,
     );
   }
 

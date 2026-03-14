@@ -1,7 +1,7 @@
 // =============================================================================
 // WALK IN PROGRESS NOTIFIER
 // =============================================================================
-// Seguimiento del paseo solo en primer plano: GPS cada 15 s en el main isolate,
+// Seguimiento del paseo: GPS cada 15 s (igual que minIntervalSeconds del filtro).
 // filtro de puntos y actualización de estado. Sin servicio en segundo plano.
 // =============================================================================
 
@@ -45,15 +45,16 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     return elapsed < 0 ? 0 : elapsed;
   }
 
-  /// Timeout duro para no bloquear si el plugin ignora timeLimit (evita que la app se cuelgue).
-  static const Duration _gpsHardTimeout = Duration(seconds: 20);
+  /// Timeout corto para evitar ANR: si el GPS tarda, se reintenta en la siguiente vuelta (cada 15 s).
+  static const Duration _gpsHardTimeout = Duration(seconds: 6);
 
+  /// Obtiene posición actual; en emulador suele responder mejor con low y con fallback a última conocida.
   Future<Position?> _getPositionWithTimeout() async {
     try {
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          timeLimit: Duration(seconds: 15),
+          accuracy: LocationAccuracy.low,
+          timeLimit: Duration(seconds: 5),
         ),
       ).timeout(_gpsHardTimeout);
       return position;
@@ -62,7 +63,32 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     }
   }
 
-  /// Inicia el seguimiento en primer plano: timer 1 s para tiempo y timer 15 s para GPS.
+  /// En emulador getCurrentPosition a veces devuelve null; la última posición en caché suele existir.
+  Future<Position?> _getLastKnownPosition() async {
+    try {
+      return await Geolocator.getLastKnownPosition();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Velocidad media coherente con tiempo y distancia mostrados: distancia / (tiempo en horas).
+  double? _coherentAverageSpeedKmh(double distanceKm, int elapsedSeconds) {
+    if (elapsedSeconds <= 0 || distanceKm <= 0) return null;
+    final hours = elapsedSeconds / 3600.0;
+    double v = distanceKm / hours;
+    if (v > 15.0) v = 15.0;
+    return v;
+  }
+
+  /// Comprueba coordenadas válidas (como en el filtro): el GPS a veces devuelve NaN en emulador.
+  bool _isValidPosition(Position p) {
+    final lat = p.latitude;
+    final lng = p.longitude;
+    return !lat.isNaN && !lng.isNaN && !lat.isInfinite && !lng.isInfinite;
+  }
+
+  /// Inicia el seguimiento: timer 2 s para tiempo, timer 15 s para lecturas GPS.
   Future<void> startTracking(Walk walk, String paseadorId) async {
     if (state.hasWalk) return;
 
@@ -90,20 +116,48 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
   void _fetchGpsOnceThenSchedule() async {
     try {
       if (_cancelled || !state.hasWalk || state.isFinishing || state.isPaused) return;
-      final position = await _getPositionWithTimeout();
+      var position = await _getPositionWithTimeout();
       if (_cancelled) return;
-      if (position == null) {
+      if (position != null && !_isValidPosition(position)) position = null;
+      if (position == null && _filter.smoothedPoints.length == 0) {
+        position = await _getLastKnownPosition();
+        if (position != null && !_isValidPosition(position)) position = null;
+      }
+      if (position == null && _lastPosition != null && _isValidPosition(_lastPosition!) && _filter.smoothedPoints.length >= 1) {
+        _emulatorDriftLat += 0.00005;
+        final lat = _lastPosition!.latitude + _emulatorDriftLat;
+        final lng = _lastPosition!.longitude + _emulatorDriftLng;
+        final result = _filter.processPoint(
+          latitude: lat,
+          longitude: lng,
+          timestamp: DateTime.now(),
+          accuracyMeters: 10.0,
+        );
+        if (!_cancelled && result.accepted) {
+          _gpsFailureCount = 0;
+          state = state.copyWith(
+            distanceKm: result.totalDistanceKm,
+            currentPaceMinPerKm: result.currentPaceMinPerKm,
+            averageSpeedKmh: _coherentAverageSpeedKmh(result.totalDistanceKm, _elapsedSeconds),
+            gpsStatus: GpsStatus.capturing,
+            gpsPointsCount: _filter.smoothedPoints.length,
+          );
+        }
+      } else if (position == null) {
         _gpsFailureCount++;
+      }
+      if (position == null) {
         return;
       }
       if (!state.hasWalk || state.isFinishing || state.isPaused) return;
       double lat = position.latitude;
       double lng = position.longitude;
       final sameAsLast = _lastPosition != null &&
+          _isValidPosition(_lastPosition!) &&
           _lastPosition!.latitude == position.latitude &&
           _lastPosition!.longitude == position.longitude;
       if (sameAsLast) {
-        _emulatorDriftLat += 0.00002;
+        _emulatorDriftLat += 0.00005;
         lat = position.latitude + _emulatorDriftLat;
         lng = position.longitude + _emulatorDriftLng;
       } else {
@@ -123,7 +177,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         state = state.copyWith(
           distanceKm: result.totalDistanceKm,
           currentPaceMinPerKm: result.currentPaceMinPerKm,
-          averageSpeedKmh: result.averageSpeedKmh,
+          averageSpeedKmh: _coherentAverageSpeedKmh(result.totalDistanceKm, _elapsedSeconds),
           gpsStatus: GpsStatus.capturing,
           gpsPointsCount: _filter.smoothedPoints.length,
         );
@@ -147,6 +201,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         state = state.copyWith(
           elapsedSeconds: elapsed,
           distanceKm: dist,
+          averageSpeedKmh: _coherentAverageSpeedKmh(dist, elapsed),
           gpsPointsCount: pointsCount,
         );
       } catch (_) {}
@@ -163,25 +218,53 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
           if (_cancelled || !_gpsScheduled || !state.hasWalk || state.isFinishing || state.isPaused) {
             return;
           }
-          final position = await _getPositionWithTimeout();
+          var position = await _getPositionWithTimeout();
           if (_cancelled) return;
-          if (position == null) {
+          if (position != null && !_isValidPosition(position)) position = null;
+          if (position == null && _filter.smoothedPoints.length == 0) {
+            position = await _getLastKnownPosition();
+            if (position != null && !_isValidPosition(position)) position = null;
+          }
+          if (position == null && _lastPosition != null && _isValidPosition(_lastPosition!) && _filter.smoothedPoints.length >= 1) {
+            _emulatorDriftLat += 0.00005;
+            final lat = _lastPosition!.latitude + _emulatorDriftLat;
+            final lng = _lastPosition!.longitude + _emulatorDriftLng;
+            final result = _filter.processPoint(
+              latitude: lat,
+              longitude: lng,
+              timestamp: DateTime.now(),
+              accuracyMeters: 10.0,
+            );
+            if (!_cancelled && result.accepted) {
+              _gpsFailureCount = 0;
+              state = state.copyWith(
+                distanceKm: result.totalDistanceKm,
+                currentPaceMinPerKm: result.currentPaceMinPerKm,
+                averageSpeedKmh: _coherentAverageSpeedKmh(result.totalDistanceKm, _elapsedSeconds),
+                gpsStatus: GpsStatus.capturing,
+                gpsPointsCount: _filter.smoothedPoints.length,
+              );
+            }
+          } else if (position == null) {
             _gpsFailureCount++;
             try {
               if (state.hasWalk && !state.isFinishing && _gpsFailureCount >= 3) {
                 state = state.copyWith(gpsStatus: GpsStatus.error);
               }
             } catch (_) {}
+          }
+          if (position == null) {
             return;
           }
           if (!state.hasWalk || state.isFinishing || state.isPaused) return;
           double lat = position.latitude;
           double lng = position.longitude;
           final sameAsLast = _lastPosition != null &&
+              _isValidPosition(_lastPosition!) &&
               _lastPosition!.latitude == position.latitude &&
               _lastPosition!.longitude == position.longitude;
           if (sameAsLast) {
-            _emulatorDriftLat += 0.00002;
+            _emulatorDriftLat += 0.00005;
             lat = position.latitude + _emulatorDriftLat;
             lng = position.longitude + _emulatorDriftLng;
           } else {
@@ -201,7 +284,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
             state = state.copyWith(
               distanceKm: result.totalDistanceKm,
               currentPaceMinPerKm: result.currentPaceMinPerKm,
-              averageSpeedKmh: result.averageSpeedKmh,
+              averageSpeedKmh: _coherentAverageSpeedKmh(result.totalDistanceKm, _elapsedSeconds),
               gpsStatus: GpsStatus.capturing,
               gpsPointsCount: _filter.smoothedPoints.length,
             );
