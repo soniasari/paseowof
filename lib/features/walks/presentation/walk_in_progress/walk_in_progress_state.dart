@@ -32,6 +32,8 @@ class WalkInProgressState {
   final String? errorMessage;
   /// Número de puntos GPS aceptados (para diagnóstico y UI).
   final int gpsPointsCount;
+  /// Última lectura GPS (fuente, precisión, resultado del filtro). Solo se muestra en debug.
+  final String? gpsDebugInfo;
 
   const WalkInProgressState({
     this.status = WalkInProgressStatus.idle,
@@ -44,6 +46,7 @@ class WalkInProgressState {
     this.averageSpeedKmh,
     this.errorMessage,
     this.gpsPointsCount = 0,
+    this.gpsDebugInfo,
   });
 
   bool get isTracking => status == WalkInProgressStatus.tracking;
@@ -62,6 +65,7 @@ class WalkInProgressState {
     double? averageSpeedKmh,
     String? errorMessage,
     int? gpsPointsCount,
+    String? gpsDebugInfo,
     bool clearError = false,
   }) {
     return WalkInProgressState(
@@ -75,6 +79,7 @@ class WalkInProgressState {
       averageSpeedKmh: averageSpeedKmh ?? this.averageSpeedKmh,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       gpsPointsCount: gpsPointsCount ?? this.gpsPointsCount,
+      gpsDebugInfo: gpsDebugInfo ?? this.gpsDebugInfo,
     );
   }
 }

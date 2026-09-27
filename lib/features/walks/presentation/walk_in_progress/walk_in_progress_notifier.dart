@@ -1,14 +1,17 @@
 // =============================================================================
 // WALK IN PROGRESS NOTIFIER
 // =============================================================================
-// Seguimiento del paseo solo en primer plano: GPS cada 15 s en el main isolate,
-// filtro de puntos y actualización de estado. Sin servicio en segundo plano.
+// Seguimiento del paseo: un StreamSubscription de GPS (intervalo ~5 s +
+// distanceFilter), fallback acotado si el stream no emite, y timers de UI.
+// Nunca se inventan desplazamientos: si el GPS no se mueve, la distancia no crece.
 // =============================================================================
 
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../../core/di/dependency_injection.dart';
+import '../../data/services/walk_location_stream_service.dart';
 import '../../data/services/walk_track_filter_service.dart';
 import '../../domain/entities/walk.dart';
 import '../../domain/use_cases/complete_walk_with_track_use_case.dart';
@@ -17,25 +20,27 @@ import 'walk_in_progress_state.dart';
 class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
   WalkInProgressNotifier({
     required CompleteWalkWithTrackUseCase completeWalkWithTrackUseCase,
+    WalkLocationStreamService? locationStreamService,
   })  : _completeWalkWithTrackUseCase = completeWalkWithTrackUseCase,
+        _locationStream = locationStreamService ?? WalkLocationStreamService(),
         super(const WalkInProgressState());
 
   final CompleteWalkWithTrackUseCase _completeWalkWithTrackUseCase;
+  final WalkLocationStreamService _locationStream;
   final WalkTrackFilterService _filter = WalkTrackFilterService();
 
   Timer? _stateTimer;
-  Timer? _gpsTimer;
+  Timer? _fallbackTimer;
   bool _gpsScheduled = true;
   bool _cancelled = false;
+  bool _handlingGps = false;
   int _gpsFailureCount = 0;
   DateTime? _startTime;
   double _totalPausedSeconds = 0.0;
   DateTime? _pausedAt;
-  /// Última posición recibida (para detectar emulador sin movimiento).
-  Position? _lastPosition;
-  /// Pequeño desplazamiento acumulado cuando la posición no cambia (emulador fijo).
-  double _emulatorDriftLat = 0.0;
-  double _emulatorDriftLng = 0.0;
+  DateTime? _lastStreamEventAt;
+  /// Timestamp del último fix procesado; evita reprocesar la misma lectura.
+  DateTime? _lastFixTimestamp;
 
   int get _elapsedSeconds {
     if (_startTime == null) return 0;
@@ -45,32 +50,72 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     return elapsed < 0 ? 0 : elapsed;
   }
 
-  /// Timeout duro para no bloquear si el plugin ignora timeLimit (evita que la app se cuelgue).
-  static const Duration _gpsHardTimeout = Duration(seconds: 20);
+  /// Timeout corto: getCurrentPosition en Android puede bloquear el isolate si no hay fix.
+  static const Duration _gpsHardTimeout = Duration(seconds: 10);
 
+  /// Si el stream no emite en este tiempo, un fallback acotado (GPS frío).
+  static const Duration _streamSilenceBeforeFallback = Duration(seconds: 30);
+
+  /// Una posición cacheada solo sirve como semilla si es reciente.
+  static const Duration _lastKnownMaxAge = Duration(seconds: 15);
+
+  /// Fallback con precisión alta. En Android se fuerza LocationManager (GPS puro):
+  /// el proveedor "fused" responde con su caché y devolvería la misma posición en
+  /// cada tick aunque el dispositivo se esté moviendo.
   Future<Position?> _getPositionWithTimeout() async {
     try {
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.medium,
-          timeLimit: Duration(seconds: 15),
-        ),
-      ).timeout(_gpsHardTimeout);
+      final LocationSettings settings = defaultTargetPlatform == TargetPlatform.android && !kIsWeb
+          ? AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              forceLocationManager: true,
+              timeLimit: const Duration(seconds: 8),
+            )
+          : const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            );
+      final position = await Geolocator.getCurrentPosition(locationSettings: settings)
+          .timeout(_gpsHardTimeout);
       return position;
     } catch (_) {
       return null;
     }
   }
 
-  /// Inicia el seguimiento en primer plano: timer 1 s para tiempo y timer 15 s para GPS.
+  Future<Position?> _getFreshLastKnownPosition() async {
+    try {
+      final p = await Geolocator.getLastKnownPosition();
+      if (p == null) return null;
+      if (DateTime.now().difference(p.timestamp) > _lastKnownMaxAge) return null;
+      return p;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Velocidad media coherente con tiempo y distancia mostrados: distancia / (tiempo en horas).
+  double? _coherentAverageSpeedKmh(double distanceKm, int elapsedSeconds) {
+    if (elapsedSeconds <= 0 || distanceKm <= 0) return null;
+    final hours = elapsedSeconds / 3600.0;
+    double v = distanceKm / hours;
+    if (v > 15.0) v = 15.0;
+    return v;
+  }
+
+  bool _isValidPosition(Position p) {
+    final lat = p.latitude;
+    final lng = p.longitude;
+    return !lat.isNaN && !lng.isNaN && !lat.isInfinite && !lng.isInfinite;
+  }
+
   Future<void> startTracking(Walk walk, String paseadorId) async {
     if (state.hasWalk) return;
 
     _filter.reset();
     _cancelled = false;
-    _lastPosition = null;
-    _emulatorDriftLat = 0.0;
-    _emulatorDriftLng = 0.0;
+    _handlingGps = false;
+    _lastStreamEventAt = null;
+    _lastFixTimestamp = null;
     _startTime = DateTime.now();
     _totalPausedSeconds = 0.0;
     _pausedAt = null;
@@ -84,54 +129,158 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     );
 
     _startStateTimer();
-    _fetchGpsOnceThenSchedule();
+    _startGpsListening();
   }
 
-  void _fetchGpsOnceThenSchedule() async {
+  void _startGpsListening() {
+    _gpsScheduled = true;
+    _fallbackTimer?.cancel();
+    _streamSubscribedAt = DateTime.now();
+    _lastStreamEventAt = null;
+
+    unawaited(_locationStream.listen(
+      _onStreamPosition,
+      onError: _onGpsStreamError,
+    ));
+
+    _fallbackTimer = Timer.periodic(walkFallbackInterval, (_) {
+      unawaited(_fallbackGpsTick());
+    });
+
+    unawaited(_seedWithLastKnown());
+  }
+
+  DateTime? _streamSubscribedAt;
+  bool _restartingStream = false;
+
+  /// El stream lleva callado desde el último evento (o desde que se suscribió).
+  bool get _streamIsSilent {
+    final ref = _lastStreamEventAt ?? _streamSubscribedAt;
+    if (ref == null) return true;
+    return DateTime.now().difference(ref) >= _streamSilenceBeforeFallback;
+  }
+
+  /// Vuelve a suscribirse alternando proveedor. Cubre el caso en que el servicio
+  /// nativo de geolocator no estaba listo y el stream quedó mudo sin error.
+  Future<void> _restartStream() async {
+    if (_restartingStream || _cancelled || !_gpsScheduled) return;
+    _restartingStream = true;
     try {
-      if (_cancelled || !state.hasWalk || state.isFinishing || state.isPaused) return;
-      final position = await _getPositionWithTimeout();
-      if (_cancelled) return;
-      if (position == null) {
-        _gpsFailureCount++;
-        return;
+      await _locationStream.restart(
+        _onStreamPosition,
+        onError: _onGpsStreamError,
+      );
+      _streamSubscribedAt = DateTime.now();
+      _lastStreamEventAt = null;
+      if (kDebugMode) {
+        debugPrint('[GPS] stream reiniciado (locationManager=${_locationStream.usingLocationManager})');
       }
-      if (!state.hasWalk || state.isFinishing || state.isPaused) return;
-      double lat = position.latitude;
-      double lng = position.longitude;
-      final sameAsLast = _lastPosition != null &&
-          _lastPosition!.latitude == position.latitude &&
-          _lastPosition!.longitude == position.longitude;
-      if (sameAsLast) {
-        _emulatorDriftLat += 0.00002;
-        lat = position.latitude + _emulatorDriftLat;
-        lng = position.longitude + _emulatorDriftLng;
-      } else {
-        _emulatorDriftLat = 0.0;
-        _emulatorDriftLng = 0.0;
+    } catch (_) {
+    } finally {
+      _restartingStream = false;
+    }
+  }
+
+  Future<void> _seedWithLastKnown() async {
+    if (_cancelled || !_gpsScheduled || state.isPaused) return;
+    final known = await _getFreshLastKnownPosition();
+    if (known != null && _isValidPosition(known)) {
+      await _ingestPosition(known);
+    }
+  }
+
+  void _onStreamPosition(Position position) {
+    if (_cancelled || !_gpsScheduled || !state.hasWalk || state.isFinishing || state.isPaused) {
+      return;
+    }
+    _lastStreamEventAt = DateTime.now();
+    unawaited(_ingestPosition(position, source: 'stream'));
+  }
+
+  void _onGpsStreamError(dynamic error) {
+    if (_cancelled || !state.hasWalk || state.isFinishing) return;
+    _gpsFailureCount++;
+    if (_gpsFailureCount >= 3) {
+      try {
+        state = state.copyWith(gpsStatus: GpsStatus.error);
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _fallbackGpsTick() async {
+    if (_cancelled || !_gpsScheduled || !state.hasWalk || state.isFinishing || state.isPaused) {
+      return;
+    }
+    if (!_streamIsSilent) return;
+    if (_handlingGps) return;
+
+    // Primero intentar recuperar el stream; el fallback puntual solo cubre el hueco.
+    unawaited(_restartStream());
+
+    var position = await _getPositionWithTimeout();
+    if (position != null && !_isValidPosition(position)) position = null;
+    if (position == null) {
+      _gpsFailureCount++;
+      if (_gpsFailureCount >= 3 && state.hasWalk && !state.isFinishing) {
+        try {
+          state = state.copyWith(
+            gpsStatus: GpsStatus.error,
+            gpsDebugInfo: 'fallback sin respuesta (${_gpsFailureCount}x)',
+          );
+        } catch (_) {}
       }
-      _lastPosition = position;
+      return;
+    }
+    await _ingestPosition(position, source: 'fallback');
+  }
+
+  Future<void> _ingestPosition(Position position, {String source = 'stream'}) async {
+    if (_cancelled || !state.hasWalk || state.isFinishing || state.isPaused) return;
+    if (_handlingGps) return;
+    _handlingGps = true;
+    try {
+      if (!_isValidPosition(position)) return;
+
+      // Misma lectura entregada dos veces (stream + fallback): no reprocesar.
+      final fixTime = position.timestamp;
+      if (_lastFixTimestamp != null && !fixTime.isAfter(_lastFixTimestamp!)) return;
+      _lastFixTimestamp = fixTime;
+
+      // Timestamp del fix (no "ahora"): así la velocidad del filtro usa el tiempo real entre lecturas.
       final result = _filter.processPoint(
-        latitude: lat,
-        longitude: lng,
-        timestamp: DateTime.now(),
+        latitude: position.latitude,
+        longitude: position.longitude,
+        timestamp: fixTime,
         accuracyMeters: position.accuracy,
       );
       if (_cancelled) return;
+      final provider = _locationStream.usingLocationManager ? 'LM' : 'fused';
+      final debugInfo =
+          '$source/$provider acc=${position.accuracy.toStringAsFixed(0)}m '
+          '${result.accepted ? 'OK' : 'X:${result.rejectReason?.name}'} '
+          '${(result.totalDistanceKm * 1000).toStringAsFixed(0)}m pts=${_filter.smoothedPoints.length}';
+      if (kDebugMode) {
+        debugPrint(
+          '[GPS] ${position.latitude.toStringAsFixed(6)},${position.longitude.toStringAsFixed(6)} $debugInfo',
+        );
+      }
       if (result.accepted) {
         _gpsFailureCount = 0;
         state = state.copyWith(
           distanceKm: result.totalDistanceKm,
           currentPaceMinPerKm: result.currentPaceMinPerKm,
-          averageSpeedKmh: result.averageSpeedKmh,
+          averageSpeedKmh: _coherentAverageSpeedKmh(result.totalDistanceKm, _elapsedSeconds),
           gpsStatus: GpsStatus.capturing,
           gpsPointsCount: _filter.smoothedPoints.length,
+          gpsDebugInfo: debugInfo,
         );
+      } else {
+        state = state.copyWith(gpsDebugInfo: debugInfo);
       }
     } catch (_) {
       if (!_cancelled) _gpsFailureCount++;
     } finally {
-      if (!_cancelled) _startGpsTimer();
+      _handlingGps = false;
     }
   }
 
@@ -143,100 +292,37 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         final elapsed = _elapsedSeconds;
         final dist = _filter.totalDistanceKm;
         final pointsCount = _filter.smoothedPoints.length;
-        if (state.elapsedSeconds == elapsed && state.distanceKm == dist && state.gpsPointsCount == pointsCount) return;
+        if (state.elapsedSeconds == elapsed && state.distanceKm == dist && state.gpsPointsCount == pointsCount) {
+          return;
+        }
         state = state.copyWith(
           elapsedSeconds: elapsed,
           distanceKm: dist,
+          averageSpeedKmh: _coherentAverageSpeedKmh(dist, elapsed),
           gpsPointsCount: pointsCount,
         );
       } catch (_) {}
     });
   }
 
-  void _startGpsTimer() {
-    _gpsTimer?.cancel();
-    _gpsScheduled = true;
-    void scheduleNext() {
-      if (!_gpsScheduled) return;
-      _gpsTimer = Timer(const Duration(seconds: 15), () async {
-        try {
-          if (_cancelled || !_gpsScheduled || !state.hasWalk || state.isFinishing || state.isPaused) {
-            return;
-          }
-          final position = await _getPositionWithTimeout();
-          if (_cancelled) return;
-          if (position == null) {
-            _gpsFailureCount++;
-            try {
-              if (state.hasWalk && !state.isFinishing && _gpsFailureCount >= 3) {
-                state = state.copyWith(gpsStatus: GpsStatus.error);
-              }
-            } catch (_) {}
-            return;
-          }
-          if (!state.hasWalk || state.isFinishing || state.isPaused) return;
-          double lat = position.latitude;
-          double lng = position.longitude;
-          final sameAsLast = _lastPosition != null &&
-              _lastPosition!.latitude == position.latitude &&
-              _lastPosition!.longitude == position.longitude;
-          if (sameAsLast) {
-            _emulatorDriftLat += 0.00002;
-            lat = position.latitude + _emulatorDriftLat;
-            lng = position.longitude + _emulatorDriftLng;
-          } else {
-            _emulatorDriftLat = 0.0;
-            _emulatorDriftLng = 0.0;
-          }
-          _lastPosition = position;
-          final result = _filter.processPoint(
-            latitude: lat,
-            longitude: lng,
-            timestamp: DateTime.now(),
-            accuracyMeters: position.accuracy,
-          );
-          if (_cancelled) return;
-          if (result.accepted) {
-            _gpsFailureCount = 0;
-            state = state.copyWith(
-              distanceKm: result.totalDistanceKm,
-              currentPaceMinPerKm: result.currentPaceMinPerKm,
-              averageSpeedKmh: result.averageSpeedKmh,
-              gpsStatus: GpsStatus.capturing,
-              gpsPointsCount: _filter.smoothedPoints.length,
-            );
-          }
-        } catch (_) {
-          if (!_cancelled) {
-            _gpsFailureCount++;
-            try {
-              if (state.hasWalk && !state.isFinishing && _gpsFailureCount >= 3) {
-                state = state.copyWith(gpsStatus: GpsStatus.error);
-              }
-            } catch (_) {}
-          }
-        } finally {
-          scheduleNext();
-        }
-      });
-    }
-    scheduleNext();
+  void _stopGpsListening() {
+    _gpsScheduled = false;
+    unawaited(_locationStream.cancel());
+    _fallbackTimer?.cancel();
+    _fallbackTimer = null;
   }
 
   void _stopTimers() {
     _cancelled = true;
-    _gpsScheduled = false;
+    _stopGpsListening();
     _stateTimer?.cancel();
     _stateTimer = null;
-    _gpsTimer?.cancel();
-    _gpsTimer = null;
   }
 
   void pause() {
     if (!state.hasWalk || state.isPaused) return;
     _pausedAt = DateTime.now();
-    _gpsTimer?.cancel();
-    _gpsTimer = null;
+    _stopGpsListening();
     state = state.copyWith(status: WalkInProgressStatus.paused);
   }
 
@@ -246,13 +332,23 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
       _totalPausedSeconds += DateTime.now().difference(_pausedAt!).inSeconds;
       _pausedAt = null;
     }
-    _startGpsTimer();
+    _cancelled = false;
+    _startGpsListening();
     state = state.copyWith(status: WalkInProgressStatus.tracking);
   }
 
   /// Finaliza el paseo: obtiene los 15 puntos del filtro y sube a Firestore.
+  /// Requiere al menos 15 puntos GPS reales (no se rellena con duplicados).
   Future<void> finishWalk() async {
     if (!state.hasWalk || state.isFinishing) return;
+
+    final pointsCount = _filter.smoothedPoints.length;
+    if (pointsCount < 15) {
+      state = state.copyWith(
+        errorMessage: 'Se necesitan al menos 15 puntos para finalizar el paseo (actual: $pointsCount/15). Continúa el recorrido un poco más.',
+      );
+      return;
+    }
 
     state = state.copyWith(status: WalkInProgressStatus.finishing);
     _stopTimers();
@@ -262,16 +358,14 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     final distanceKm = _filter.totalDistanceKm;
 
     final points = _filter.select15Points();
-
     if (points.length < 15) {
       _cancelled = false;
-      _gpsScheduled = true;
       state = state.copyWith(
         status: WalkInProgressStatus.tracking,
         errorMessage: 'Se necesitan al menos 15 puntos para guardar la ruta.',
       );
       _startStateTimer();
-      _fetchGpsOnceThenSchedule();
+      _startGpsListening();
       return;
     }
 
@@ -285,7 +379,6 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
       state = const WalkInProgressState();
     } catch (e) {
       _cancelled = false;
-      _gpsScheduled = true;
       state = WalkInProgressState(
         status: WalkInProgressStatus.tracking,
         walk: walk,
@@ -296,16 +389,21 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         errorMessage: e.toString(),
       );
       _startStateTimer();
-      _fetchGpsOnceThenSchedule();
+      _startGpsListening();
     }
   }
 
-  /// Cancela el seguimiento sin guardar.
   Future<void> cancel() async {
     _stopTimers();
     try {
       state = const WalkInProgressState();
     } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _stopTimers();
+    super.dispose();
   }
 }
 
@@ -314,5 +412,6 @@ final walkInProgressProvider =
     StateNotifierProvider<WalkInProgressNotifier, WalkInProgressState>((ref) {
   return WalkInProgressNotifier(
     completeWalkWithTrackUseCase: ref.watch(completeWalkWithTrackUseCaseProvider),
+    locationStreamService: ref.watch(walkLocationStreamServiceProvider),
   );
 });

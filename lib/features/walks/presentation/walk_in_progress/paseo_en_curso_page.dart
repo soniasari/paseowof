@@ -5,6 +5,7 @@
 // ritmo y velocidad media; botones Pausar y Finalizar paseo.
 // =============================================================================
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/constants/app_colors.dart';
@@ -31,7 +32,10 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
   @override
   void initState() {
     super.initState();
+    // Primero pinta la pantalla; luego inicia el seguimiento para evitar ANR al bloquear en la primera lectura GPS.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await Future<void>.delayed(const Duration(milliseconds: 300));
       if (!mounted) return;
       try {
         await ref.read(walkInProgressProvider.notifier).startTracking(widget.walk, widget.paseadorId);
@@ -234,15 +238,12 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                 ),
               ],
             ),
-            if (state.gpsPointsCount > 0) ...[
-              const SizedBox(height: 4),
+            if (kDebugMode && state.gpsDebugInfo != null) ...[
+              const SizedBox(height: 6),
               Text(
-                'Puntos: ${state.gpsPointsCount}',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textGrey,
-                ),
+                state.gpsDebugInfo!,
                 textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 10, color: AppColors.textGrey),
               ),
             ],
             const SizedBox(height: 32),
@@ -361,7 +362,8 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: () async {
+                    onPressed: state.gpsPointsCount >= 15
+                        ? () async {
                       final paseadorId = widget.paseadorId;
                       final fechaPaseo = widget.walk.fechaPaseo;
                       final nav = Navigator.of(context);
@@ -386,11 +388,14 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                         if (!mounted) return;
                         nav.popUntil((route) => route.isFirst);
                       }
-                    },
+                    }
+                    : null,
                     icon: const Icon(Icons.stop_rounded, size: 20, color: Colors.white),
-                    label: const Text(
-                      'FINALIZAR PASEO',
-                      style: TextStyle(
+                    label: Text(
+                      state.gpsPointsCount >= 15
+                          ? 'FINALIZAR PASEO'
+                          : 'FINALIZAR (${state.gpsPointsCount}/15 pts)',
+                      style: const TextStyle(
                         fontWeight: FontWeight.w600,
                         color: Colors.white,
                         fontSize: 12,
