@@ -71,13 +71,18 @@ Future<void> _walkTrackingOnStart(ServiceInstance instance) async {
     }
 
     try {
+      // timeLimit evita que getCurrentPosition cuelgue el isolate si no hay fix GPS.
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
-      );
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 5,
+          timeLimit: Duration(seconds: 8),
+        ),
+      ).timeout(const Duration(seconds: 10));
       final result = filter.processPoint(
         latitude: position.latitude,
         longitude: position.longitude,
-        timestamp: DateTime.now(),
+        timestamp: position.timestamp,
         accuracyMeters: position.accuracy,
       );
       if (result.accepted) {
