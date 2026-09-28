@@ -2,7 +2,8 @@
 // PASEO EN CURSO PAGE
 // =============================================================================
 // Pantalla activa durante el paseo: tiempo, distancia, estado del GPS,
-// ritmo y velocidad media; botones Pausar y Finalizar paseo.
+// ritmo y velocidad media; botones Pausar y Finalizar paseo. El GPS sigue
+// registrando con la pantalla apagada (notificación fija "Paseo en curso").
 // =============================================================================
 
 import 'package:flutter/foundation.dart';
@@ -29,9 +30,16 @@ class PaseoEnCursoPage extends ConsumerStatefulWidget {
 }
 
 class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
+  late final AppLifecycleListener _lifecycleListener;
+
   @override
   void initState() {
     super.initState();
+    final notifier = ref.read(walkInProgressProvider.notifier);
+    _lifecycleListener = AppLifecycleListener(
+      onShow: () => notifier.onAppLifecycleChanged(inForeground: true),
+      onHide: () => notifier.onAppLifecycleChanged(inForeground: false),
+    );
     // Primero pinta la pantalla; luego inicia el seguimiento para evitar ANR al bloquear en la primera lectura GPS.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
@@ -56,16 +64,45 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
 
   @override
   void dispose() {
+    _lifecycleListener.dispose();
     if (!_disposed) {
       _disposed = true;
       try {
         final currentState = ref.read(walkInProgressProvider);
         if (!currentState.isFinishing) {
-          ref.read(walkInProgressProvider.notifier).cancel();
+          // Salida no confirmada por el usuario: se conserva el progreso para poder retomarlo.
+          ref.read(walkInProgressProvider.notifier).cancel(discardProgress: false);
         }
       } catch (_) {}
     }
     super.dispose();
+  }
+
+  /// Confirmación común para la X y el botón/gesto "atrás" de Android.
+  Future<void> _confirmExit() async {
+    final exit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Salir del paseo'),
+        content: const Text(
+          'Si sales ahora no se guardará la ruta. ¿Quieres cancelar el seguimiento?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Seguir'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Salir', style: TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+    if (exit == true && mounted) {
+      await ref.read(walkInProgressProvider.notifier).cancel();
+      if (mounted) Navigator.pop(context);
+    }
   }
 
   String _formatElapsed(int seconds) {
@@ -138,6 +175,17 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
     final state = ref.watch(walkInProgressProvider);
     final notifier = ref.read(walkInProgressProvider.notifier);
 
+    ref.listen<String?>(
+      walkInProgressProvider.select((s) => s.infoMessage),
+      (previous, next) {
+        if (next != null && next != previous) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(next), duration: const Duration(seconds: 5)),
+          );
+        }
+      },
+    );
+
     if (state.isFinishing) {
       return Scaffold(
         backgroundColor: AppColors.background,
@@ -163,7 +211,12 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
             ? 'GPS CON ERROR'
             : 'GPS INACTIVO';
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _confirmExit();
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.white,
@@ -171,31 +224,7 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close),
-          onPressed: () async {
-            final exit = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Salir del paseo'),
-                content: const Text(
-                  'Si sales ahora no se guardará la ruta. ¿Quieres cancelar el seguimiento?',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Seguir'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('Salir', style: TextStyle(color: AppColors.error)),
-                  ),
-                ],
-              ),
-            );
-            if (exit == true && mounted) {
-              notifier.cancel();
-              Navigator.pop(context);
-            }
-          },
+          onPressed: _confirmExit,
         ),
         title: const Text(
           'Paseo en curso',
@@ -414,6 +443,7 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
