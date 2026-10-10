@@ -3,12 +3,13 @@
 // =============================================================================
 // Cadena de filtros para puntos GPS del paseo: precisión, intervalo mínimo,
 // hueco de señal, velocidad máxima, Kalman (EMA) y deadband. La distancia se
-// calcula con Geolocator.distanceBetween sobre la trayectoria ya suavizada.
-// Solo se persisten 15 puntos al finalizar.
+// calcula con Haversine sobre la trayectoria ya suavizada.
+// Solo se persisten 15 puntos al finalizar, elegidos con Douglas-Peucker.
+// Lógica de dominio pura: no depende de Flutter ni de plugins de GPS.
 // =============================================================================
 
-import 'package:geolocator/geolocator.dart';
-import '../../domain/entities/gps_point.dart';
+import 'dart:math' as math;
+import '../entities/gps_point.dart';
 
 enum FilterRejectReason {
   invalidCoordinates,
@@ -77,6 +78,11 @@ class WalkTrackFilterService {
   double? _lastRawLat;
   double? _lastRawLng;
   int _consecutiveSpeedRejects = 0;
+  /// Último punto rechazado por velocidad: si los siguientes coinciden con él y no
+  /// con el ancla, el ancla era la errónea (fix viejo o salto de posición).
+  double? _lastRejectedLat;
+  double? _lastRejectedLng;
+  DateTime? _lastRejectedTime;
 
   double get totalDistanceKm => _totalDistanceKm;
   List<GpsPoint> get smoothedPoints => List.unmodifiable(_smoothedPoints);
@@ -90,6 +96,23 @@ class WalkTrackFilterService {
     _lastAcceptedTime = null;
   }
 
+  /// Restaura un paseo guardado localmente (app cerrada por el sistema, reinicio, etc.).
+  /// El último punto queda como ancla; si el siguiente llega tras un hueco largo,
+  /// se aplica la misma regla que a cualquier corte de señal.
+  void restore({required double totalDistanceKm, required List<GpsPoint> points}) {
+    reset();
+    if (points.isEmpty) return;
+    _smoothedPoints.addAll(points);
+    _totalDistanceKm = totalDistanceKm;
+    final last = points.last;
+    _kalmanLat = last.latitude;
+    _kalmanLng = last.longitude;
+    _lastSmoothedPoint = last;
+    _lastRawLat = last.latitude;
+    _lastRawLng = last.longitude;
+    _lastAcceptedTime = last.timestamp;
+  }
+
   /// Olvida el ancla espacial: el siguiente punto válido arranca de cero sin sumar el salto.
   void _resetAnchor() {
     _kalmanLat = null;
@@ -98,6 +121,24 @@ class WalkTrackFilterService {
     _lastRawLat = null;
     _lastRawLng = null;
     _consecutiveSpeedRejects = 0;
+    _clearRejected();
+  }
+
+  void _clearRejected() {
+    _lastRejectedLat = null;
+    _lastRejectedLng = null;
+    _lastRejectedTime = null;
+  }
+
+  /// El punto nuevo es coherente (velocidad plausible) con el último rechazado.
+  bool _agreesWithLastRejected(double latitude, double longitude, DateTime timestamp) {
+    if (_lastRejectedLat == null || _lastRejectedLng == null || _lastRejectedTime == null) {
+      return false;
+    }
+    final sec = timestamp.difference(_lastRejectedTime!).inSeconds;
+    if (sec <= 0) return false;
+    final km = _distanceKm(_lastRejectedLat!, _lastRejectedLng!, latitude, longitude);
+    return km / (sec / 3600.0) <= WalkTrackFilterConfig.maxSpeedKmh;
   }
 
   FilterResult _reject(FilterRejectReason reason) => FilterResult(
@@ -165,11 +206,20 @@ class WalkTrackFilterService {
           // El ancla era el outlier (p. ej. primer fix malo): reanclar en este punto sin sumar el salto.
           _resetAnchor();
         } else {
+          _lastRejectedLat = latitude;
+          _lastRejectedLng = longitude;
+          _lastRejectedTime = safeTimestamp;
           return _reject(FilterRejectReason.speedOutlier);
         }
+      } else if (_consecutiveSpeedRejects > 0 &&
+          _agreesWithLastRejected(latitude, longitude, safeTimestamp)) {
+        // Con el paso del tiempo el salto desde el ancla ya "parece" plausible, pero el
+        // punto sigue la línea de los rechazados: el ancla era la errónea. No sumar el salto.
+        _resetAnchor();
       }
     }
     _consecutiveSpeedRejects = 0;
+    _clearRejected();
 
     double smoothedLat = latitude;
     double smoothedLng = longitude;
@@ -234,27 +284,109 @@ class WalkTrackFilterService {
     return pace > WalkTrackFilterConfig.maxPaceMinPerKm ? WalkTrackFilterConfig.maxPaceMinPerKm : pace;
   }
 
-  /// Distancia en km vía Geolocator (Haversine en metros).
+  /// Haversine con el mismo radio que Geolocator.distanceBetween (WGS84 ecuatorial).
   static double _distanceKm(double lat1, double lon1, double lat2, double lon2) {
-    return Geolocator.distanceBetween(lat1, lon1, lat2, lon2) / 1000.0;
+    const earthRadiusMeters = 6378137.0;
+    double rad(double deg) => deg * math.pi / 180.0;
+    final dLat = rad(lat2 - lat1);
+    final dLon = rad(lon2 - lon1);
+    final a = math.pow(math.sin(dLat / 2), 2) +
+        math.pow(math.sin(dLon / 2), 2) * math.cos(rad(lat1)) * math.cos(rad(lat2));
+    return earthRadiusMeters * 2 * math.asin(math.sqrt(a)) / 1000.0;
   }
 
-  /// Devuelve exactamente 15 puntos: inicial, 13 intermedios y final.
+  static const int savedPointsCount = 15;
+
+  /// Devuelve exactamente [savedPointsCount] puntos: inicio, final y los intermedios
+  /// que mejor conservan la forma de la ruta (esquinas y giros).
   List<GpsPoint> select15Points() {
     if (_smoothedPoints.isEmpty) return [];
-    if (_smoothedPoints.length <= 15) {
+    if (_smoothedPoints.length <= savedPointsCount) {
       final out = List<GpsPoint>.from(_smoothedPoints);
-      while (out.length < 15) {
+      while (out.length < savedPointsCount) {
         out.add(_smoothedPoints.last);
       }
       return out;
     }
-    final indices = <int>[0];
-    for (int i = 1; i <= 13; i++) {
-      final idx = (i * (_smoothedPoints.length - 1) / 14).round();
-      indices.add(idx.clamp(0, _smoothedPoints.length - 1));
-    }
-    indices.add(_smoothedPoints.length - 1);
-    return indices.map((i) => _smoothedPoints[i]).toList();
+    return selectKeyPoints(_smoothedPoints, savedPointsCount);
   }
+
+  /// Douglas-Peucker con número fijo de puntos: parte del inicio y el final y va
+  /// añadiendo el punto más alejado de la ruta simplificada hasta tener [count].
+  /// Con los mismos puntos, el dibujo se parece mucho más al recorrido que un
+  /// muestreo a intervalos fijos, que puede saltarse una esquina.
+  static List<GpsPoint> selectKeyPoints(List<GpsPoint> points, int count) {
+    final n = points.length;
+    if (n <= count) return List<GpsPoint>.from(points);
+    if (count < 2) return [points.first];
+
+    // Proyección local a metros (equirectangular); suficiente para la escala de un paseo.
+    const earthRadius = 6371000.0;
+    final cosLat0 = math.cos(points.first.latitude * math.pi / 180);
+    final xs = List<double>.generate(
+      n,
+      (i) => points[i].longitude * math.pi / 180 * cosLat0 * earthRadius,
+    );
+    final ys = List<double>.generate(
+      n,
+      (i) => points[i].latitude * math.pi / 180 * earthRadius,
+    );
+
+    final selected = <int>{0, n - 1};
+    final candidates = <_DpCandidate>[_farthestInSegment(0, n - 1, xs, ys)];
+
+    while (selected.length < count) {
+      var bestPos = -1;
+      for (var i = 0; i < candidates.length; i++) {
+        final c = candidates[i];
+        if (c.index < 0) continue;
+        if (bestPos < 0 || c.distance > candidates[bestPos].distance) bestPos = i;
+      }
+      if (bestPos < 0) break;
+      final best = candidates.removeAt(bestPos);
+      selected.add(best.index);
+      candidates
+        ..add(_farthestInSegment(best.start, best.index, xs, ys))
+        ..add(_farthestInSegment(best.index, best.end, xs, ys));
+    }
+
+    final indices = selected.toList()..sort();
+    return indices.map((i) => points[i]).toList();
+  }
+
+  static _DpCandidate _farthestInSegment(int start, int end, List<double> xs, List<double> ys) {
+    var bestIndex = -1;
+    var bestDistance = -1.0;
+    for (var i = start + 1; i < end; i++) {
+      final d = _pointToSegmentMeters(xs[i], ys[i], xs[start], ys[start], xs[end], ys[end]);
+      if (d > bestDistance) {
+        bestDistance = d;
+        bestIndex = i;
+      }
+    }
+    return _DpCandidate(start, end, bestIndex, bestDistance);
+  }
+
+  static double _pointToSegmentMeters(
+    double px, double py, double ax, double ay, double bx, double by,
+  ) {
+    final dx = bx - ax;
+    final dy = by - ay;
+    final len2 = dx * dx + dy * dy;
+    // Inicio y fin iguales (paseo circular): distancia al punto de partida.
+    if (len2 == 0) return math.sqrt((px - ax) * (px - ax) + (py - ay) * (py - ay));
+    final t = (((px - ax) * dx + (py - ay) * dy) / len2).clamp(0.0, 1.0);
+    final cx = ax + t * dx;
+    final cy = ay + t * dy;
+    return math.sqrt((px - cx) * (px - cx) + (py - cy) * (py - cy));
+  }
+}
+
+class _DpCandidate {
+  final int start;
+  final int end;
+  /// Índice del punto más alejado del tramo [start]-[end]; -1 si no hay intermedios.
+  final int index;
+  final double distance;
+  const _DpCandidate(this.start, this.end, this.index, this.distance);
 }

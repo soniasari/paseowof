@@ -2,10 +2,13 @@
 // COMPLETE WALK WITH TRACK USE CASE
 // =============================================================================
 // Al finalizar el paseo: persiste los 15 puntos GPS y metadatos en
-// gps_points_walk y actualiza el paseo a estado completado con hora de fin.
+// gps_points_walk y actualiza el paseo a estado completado con hora de fin,
+// en una sola escritura. Funciona sin conexión: la escritura queda en cola y
+// el resultado indica si el servidor ya la confirmó.
 // =============================================================================
 
 import 'package:intl/intl.dart';
+import '../entities/complete_walk_result.dart';
 import '../entities/gps_point.dart';
 import '../repositories/walks_repository.dart';
 
@@ -14,8 +17,7 @@ class CompleteWalkWithTrackUseCase {
 
   final WalksRepository _repository;
 
-  /// Guarda los 15 puntos, distancia total y metadatos en Firestore y marca el paseo como completado.
-  Future<void> execute({
+  Future<CompleteWalkResult> execute({
     required String paseadorId,
     required String walkId,
     required List<GpsPoint> points,
@@ -36,23 +38,19 @@ class CompleteWalkWithTrackUseCase {
         ? '—'
         : walkPets.map((p) => p.nombreCanino).join(', ');
 
-    await _repository.saveWalkTrack(
-      paseadorId,
-      walkId,
+    final now = DateTime.now();
+    final completed = walk.copyWith(
+      estado: 'completado',
+      horaFin: DateFormat('HH:mm').format(now),
+      fechaModificacion: now,
+    );
+
+    return _repository.completeWalkWithTrack(
+      completed,
       points,
-      idPropietario: walk.propietarioId,
       idsMascotas: idsMascotas,
       nombreMascota: nombreMascota,
       distanciaKm: distanciaKm,
     );
-
-    final now = DateTime.now();
-    final horaFin = DateFormat('HH:mm').format(now);
-    final updated = walk.copyWith(
-      estado: 'completado',
-      horaFin: horaFin,
-      fechaModificacion: now,
-    );
-    await _repository.saveWalk(updated);
   }
 }

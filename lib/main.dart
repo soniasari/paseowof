@@ -11,6 +11,7 @@ import 'features/auth/presentation/login_page.dart';
 import 'features/home/presentation/home_page.dart';
 import 'features/auth/presentation/providers/auth_providers.dart';
 import 'features/home/presentation/providers/home_providers.dart';
+import 'features/walks/presentation/providers/walks_providers.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,11 +41,6 @@ void main() async {
       
       // Servicio de notificaciones locales para los recordatorios de paseo
       await LocalNotificationService().initialize();
-
-      // NO inicializar flutter_background_service aquí: crea un segundo motor
-      // Flutter que, al destruirse, apaga el servicio de ubicación de geolocator
-      // y deja mudo el stream GPS del paseo (visto en logcat: "Disposing
-      // Geolocator services"). El seguimiento en curso no lo usa.
 
       runApp(
     const ProviderScope(
@@ -80,6 +76,7 @@ class AuthWrapper extends ConsumerWidget {
           // Después del login volvemos al inicio (índice 0) para que no quede en otra pestaña
           WidgetsBinding.instance.addPostFrameCallback((_) {
             ref.read(homeNavigationControllerProvider.notifier).setIndex(0);
+            ref.read(syncPendingWalksProvider);
           });
           return const HomePage();
         }

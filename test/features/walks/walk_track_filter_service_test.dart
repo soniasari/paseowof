@@ -1,6 +1,8 @@
+import 'dart:math' as math;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:paseowof/features/walks/data/services/walk_track_filter_service.dart';
+import 'package:paseowof/features/walks/domain/services/walk_track_filter_service.dart';
+import 'package:paseowof/features/walks/domain/entities/gps_point.dart';
 
 void main() {
   late WalkTrackFilterService filter;
@@ -183,5 +185,148 @@ void main() {
     expect(pace, isNotNull);
     expect(pace!, greaterThan(9));
     expect(pace, lessThan(18));
+  });
+
+  test('fix viejo lejano al iniciar no suma el salto aunque pase tiempo (caso emulador)', () {
+    // Datos reales del log: el emulador seguía en el final de la ruta anterior
+    // y a los ~25 s la reproducción saltó al inicio (~230 m).
+    final t0 = DateTime.now().subtract(const Duration(minutes: 5));
+    filter.processPoint(
+      latitude: -16.498020, longitude: -68.121220, timestamp: t0, accuracyMeters: 5,
+    );
+    final route = <List<double>>[
+      [-16.499840, -68.120146, 24],
+      [-16.499770, -68.120115, 39],
+      [-16.499680, -68.120118, 49],
+      [-16.499590, -68.120122, 59],
+      [-16.499500, -68.120125, 69],
+      [-16.499411, -68.120128, 79],
+      [-16.499373, -68.120193, 90],
+      [-16.499377, -68.120247, 95],
+      [-16.499380, -68.120302, 100],
+      [-16.499385, -68.120355, 105],
+      [-16.499388, -68.120408, 110],
+      [-16.499392, -68.120462, 115],
+      [-16.499395, -68.120517, 120],
+      [-16.499402, -68.120613, 130],
+      [-16.499407, -68.120676, 135],
+      [-16.499410, -68.120732, 140],
+      [-16.499413, -68.120785, 145],
+      [-16.499417, -68.120838, 150],
+      [-16.499420, -68.120892, 155],
+      [-16.499425, -68.120947, 160],
+      [-16.499428, -68.121000, 165],
+      [-16.499432, -68.121052, 170],
+    ];
+    for (final p in route) {
+      filter.processPoint(
+        latitude: p[0],
+        longitude: p[1],
+        timestamp: t0.add(Duration(seconds: p[2].toInt())),
+        accuracyMeters: 5,
+      );
+    }
+    // Desde el primer punto coherente (-16.499770) hasta el último hay ~130 m reales.
+    final realKm = Geolocator.distanceBetween(-16.499770, -68.120115, -16.499411, -68.120128) / 1000 +
+        Geolocator.distanceBetween(-16.499411, -68.120128, -16.499432, -68.121052) / 1000;
+    expect(filter.totalDistanceKm, lessThan(realKm * 1.1));
+    expect(filter.totalDistanceKm, greaterThan(realKm * 0.8));
+  });
+
+  group('selección de 15 puntos (Douglas-Peucker)', () {
+    List<GpsPoint> lShapedRoute() {
+      // 60 puntos al norte y luego 60 al oeste: la esquina es el índice 59.
+      final t0 = DateTime(2026, 1, 1, 10);
+      final pts = <GpsPoint>[];
+      for (var i = 0; i < 60; i++) {
+        pts.add(GpsPoint(
+          latitude: -16.4999 + 0.00005 * i,
+          longitude: -68.1201,
+          timestamp: t0.add(Duration(seconds: 5 * i)),
+        ));
+      }
+      for (var i = 1; i <= 60; i++) {
+        pts.add(GpsPoint(
+          latitude: -16.4999 + 0.00005 * 59,
+          longitude: -68.1201 - 0.00005 * i,
+          timestamp: t0.add(Duration(seconds: 5 * (59 + i))),
+        ));
+      }
+      return pts;
+    }
+
+    test('devuelve 15 puntos en orden, con inicio, final y la esquina', () {
+      final route = lShapedRoute();
+      final selected = WalkTrackFilterService.selectKeyPoints(route, 15);
+
+      expect(selected.length, 15);
+      expect(selected.first, same(route.first));
+      expect(selected.last, same(route.last));
+      expect(selected, contains(same(route[59])), reason: 'la esquina debe conservarse');
+      for (var i = 1; i < selected.length; i++) {
+        expect(selected[i].timestamp.isAfter(selected[i - 1].timestamp), isTrue);
+      }
+    });
+
+    test('un paseo circular (inicio = final) también conserva la forma', () {
+      final t0 = DateTime(2026, 1, 1, 10);
+      final route = List<GpsPoint>.generate(80, (i) {
+        final a = 2 * 3.141592653589793 * i / 79;
+        return GpsPoint(
+          latitude: -16.4990 + 0.001 * math.sin(a),
+          longitude: -68.1200 + 0.001 * math.cos(a),
+          timestamp: t0.add(Duration(seconds: 5 * i)),
+        );
+      });
+      final selected = WalkTrackFilterService.selectKeyPoints(route, 15);
+      expect(selected.length, 15);
+      expect(selected.toSet().length, 15, reason: 'sin puntos repetidos');
+    });
+
+    test('select15Points usa la selección por forma sobre los puntos del paseo', () {
+      final t0 = DateTime.now().subtract(const Duration(minutes: 20));
+      final route = lShapedRoute();
+      for (var i = 0; i < route.length; i++) {
+        filter.processPoint(
+          latitude: route[i].latitude,
+          longitude: route[i].longitude,
+          timestamp: t0.add(Duration(seconds: 5 * i)),
+          accuracyMeters: 5,
+        );
+      }
+      final selected = filter.select15Points();
+      expect(selected.length, 15);
+      expect(selected.first, same(filter.smoothedPoints.first));
+      expect(selected.last, same(filter.smoothedPoints.last));
+    });
+  });
+
+  test('restore recupera distancia y puntos y sigue acumulando', () {
+    final t0 = DateTime.now().subtract(const Duration(minutes: 10));
+    const dLat = 0.00006;
+    for (var i = 0; i < 8; i++) {
+      filter.processPoint(
+        latitude: 4.653 + dLat * i,
+        longitude: -74.055,
+        timestamp: t0.add(Duration(seconds: 5 * i)),
+        accuracyMeters: 8,
+      );
+    }
+    final savedDistance = filter.totalDistanceKm;
+    final savedPoints = filter.smoothedPoints;
+
+    final restored = WalkTrackFilterService()
+      ..restore(totalDistanceKm: savedDistance, points: savedPoints);
+    expect(restored.totalDistanceKm, savedDistance);
+    expect(restored.smoothedPoints.length, savedPoints.length);
+
+    final r = restored.processPoint(
+      latitude: 4.653 + dLat * 8,
+      longitude: -74.055,
+      timestamp: t0.add(const Duration(seconds: 40)),
+      accuracyMeters: 8,
+    );
+    expect(r.accepted, isTrue);
+    expect(restored.totalDistanceKm, greaterThan(savedDistance));
   });
 }

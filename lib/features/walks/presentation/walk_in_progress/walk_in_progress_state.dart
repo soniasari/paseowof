@@ -34,6 +34,8 @@ class WalkInProgressState {
   final int gpsPointsCount;
   /// Última lectura GPS (fuente, precisión, resultado del filtro). Solo se muestra en debug.
   final String? gpsDebugInfo;
+  /// Aviso informativo para el usuario (p. ej. paseo retomado tras cerrarse la app).
+  final String? infoMessage;
 
   const WalkInProgressState({
     this.status = WalkInProgressStatus.idle,
@@ -47,6 +49,7 @@ class WalkInProgressState {
     this.errorMessage,
     this.gpsPointsCount = 0,
     this.gpsDebugInfo,
+    this.infoMessage,
   });
 
   bool get isTracking => status == WalkInProgressStatus.tracking;
@@ -66,6 +69,7 @@ class WalkInProgressState {
     String? errorMessage,
     int? gpsPointsCount,
     String? gpsDebugInfo,
+    String? infoMessage,
     bool clearError = false,
   }) {
     return WalkInProgressState(
@@ -80,6 +84,7 @@ class WalkInProgressState {
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       gpsPointsCount: gpsPointsCount ?? this.gpsPointsCount,
       gpsDebugInfo: gpsDebugInfo ?? this.gpsDebugInfo,
+      infoMessage: infoMessage ?? this.infoMessage,
     );
   }
 }

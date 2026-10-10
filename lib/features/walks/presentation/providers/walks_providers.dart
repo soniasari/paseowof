@@ -20,6 +20,12 @@ export '../../../../core/di/dependency_injection.dart' show
     walksRepositoryProvider,
     updateWalkStatusUseCaseProvider;
 
+/// Sube los paseos finalizados sin conexión que quedaron pendientes. Se lanza
+/// una vez al entrar con sesión; sin internet espera hasta que vuelva.
+final syncPendingWalksProvider = FutureProvider<int>((ref) {
+  return ref.watch(syncPendingWalkUseCaseProvider).execute();
+});
+
 // -----------------------------------------------------------------------------
 // Listas de paseos (FutureProvider + family para parámetros)
 // -----------------------------------------------------------------------------

@@ -36,8 +36,7 @@ dependencies:
   geolocator: ^13.0.2
   permission_handler: ^11.3.1
 
-  # Segundo plano solo mientras el GPS del paseo está activo
-  flutter_background_service: ^5.0.5
+  # Progreso del paseo en curso guardado en el teléfono
   shared_preferences: ^2.2.3
 
 dev_dependencies:

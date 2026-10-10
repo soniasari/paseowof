@@ -1,3 +1,4 @@
+import '../../domain/entities/complete_walk_result.dart';
 import '../../domain/entities/gps_point.dart';
 import '../../domain/entities/walk.dart';
 import '../../domain/entities/walk_pet.dart';
@@ -55,23 +56,22 @@ class WalksRepositoryImpl implements WalksRepository {
   }
 
   @override
-  Future<void> saveWalkTrack(
-    String paseadorId,
-    String walkId,
+  Future<CompleteWalkResult> completeWalkWithTrack(
+    Walk completedWalk,
     List<GpsPoint> points, {
-    required String idPropietario,
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
-  }) async {
-    await _remoteDataSource.saveWalkGpsPoints(
-      paseadorId,
-      walkId,
+  }) {
+    return _remoteDataSource.completeWalkWithTrack(
+      completedWalk,
       points,
-      idPropietario: idPropietario,
       idsMascotas: idsMascotas,
       nombreMascota: nombreMascota,
       distanciaKm: distanciaKm,
     );
   }
+
+  @override
+  Future<void> waitForPendingWrites() => _remoteDataSource.waitForPendingWrites();
 }
