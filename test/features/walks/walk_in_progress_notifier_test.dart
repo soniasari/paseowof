@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:paseowof/features/walks/domain/entities/complete_walk_result.dart';
 import 'package:paseowof/features/walks/domain/entities/gps_point.dart';
 import 'package:paseowof/features/walks/domain/entities/location_fix.dart';
 import 'package:paseowof/features/walks/domain/entities/walk.dart';
+import 'package:paseowof/features/walks/domain/entities/walk_pet.dart';
 import 'package:paseowof/features/walks/domain/entities/walk_progress.dart';
 import 'package:paseowof/features/walks/domain/repositories/walk_location_repository.dart';
 import 'package:paseowof/features/walks/domain/repositories/walk_progress_repository.dart';
@@ -70,10 +73,56 @@ class _FakeProgressRepository implements WalkProgressRepository {
 
   @override
   Future<void> clear() async => stored = null;
+
+  final Map<String, WalkProgress> pending = {};
+
+  @override
+  Future<void> addPendingSync(WalkProgress progress) async => pending[progress.walkId] = progress;
+
+  @override
+  Future<List<WalkProgress>> getPendingSync() async => pending.values.toList();
+
+  @override
+  Future<void> removePendingSync(String walkId) async => pending.remove(walkId);
 }
 
-/// Finalizar no se prueba aquí: si algo llama a Firestore, el test falla.
-class _UnusedWalksRepository implements WalksRepository {
+/// Simula el servidor: con [online] confirma al instante; sin él la escritura
+/// queda en cola hasta llamar a [reconnect].
+class _FakeWalksRepository implements WalksRepository {
+  _FakeWalksRepository(this.walk);
+
+  final Walk walk;
+  bool online = true;
+  Walk? savedWalk;
+  List<GpsPoint>? savedPoints;
+  final Completer<void> _serverAck = Completer<void>();
+
+  void reconnect() {
+    if (!_serverAck.isCompleted) _serverAck.complete();
+  }
+
+  @override
+  Future<Walk?> getWalkById(String paseadorId, String walkId) async => walk;
+
+  @override
+  Future<List<WalkPet>> getWalkPetsByPaseoId(String paseadorId, String paseoId) async => [
+        WalkPet(id: 'wp1', paseoId: paseoId, caninoId: 'c1', nombreCanino: 'Firulais'),
+      ];
+
+  @override
+  Future<CompleteWalkResult> completeWalkWithTrack(
+    Walk completedWalk,
+    List<GpsPoint> points, {
+    required List<String> idsMascotas,
+    required String nombreMascota,
+    required double distanciaKm,
+  }) async {
+    savedWalk = completedWalk;
+    savedPoints = points;
+    if (online) return CompleteWalkResult(synced: true, whenSynced: Future<void>.value());
+    return CompleteWalkResult(synced: false, whenSynced: _serverAck.future);
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
@@ -87,6 +136,7 @@ Future<void> _flush() async {
 void main() {
   late _FakeLocationRepository location;
   late _FakeProgressRepository progress;
+  late _FakeWalksRepository walks;
   late WalkInProgressNotifier notifier;
 
   final now = DateTime.now();
@@ -103,8 +153,9 @@ void main() {
   setUp(() {
     location = _FakeLocationRepository();
     progress = _FakeProgressRepository();
+    walks = _FakeWalksRepository(walk);
     notifier = WalkInProgressNotifier(
-      completeWalkWithTrackUseCase: CompleteWalkWithTrackUseCase(_UnusedWalksRepository()),
+      completeWalkWithTrackUseCase: CompleteWalkWithTrackUseCase(walks),
       locationRepository: location,
       progressRepository: progress,
     );
@@ -173,5 +224,76 @@ void main() {
     expect(location.stopCalls, greaterThanOrEqualTo(1));
     expect(progress.stored, isNull);
     expect(notifier.state.hasWalk, isFalse);
+  });
+
+  /// Camina hacia el norte hasta tener [count] puntos aceptados.
+  Future<void> walkPoints(int count) async {
+    final t0 = DateTime.now().subtract(Duration(seconds: 5 * count));
+    for (var i = 0; i < count; i++) {
+      location.emit(LocationFix(
+        latitude: -16.4999 + 0.00006 * i,
+        longitude: -68.1201,
+        timestamp: t0.add(Duration(seconds: 5 * i)),
+        accuracy: 5,
+      ));
+    }
+    await _flush();
+  }
+
+  test('con internet: finaliza, guarda la ruta y borra el respaldo', () async {
+    await notifier.startTracking(walk, 'p1');
+    await walkPoints(20);
+
+    final synced = await notifier.finishWalk();
+    await _flush();
+
+    expect(synced, isTrue);
+    expect(walks.savedPoints, hasLength(15));
+    expect(walks.savedWalk!.estado, 'completado');
+    expect(progress.stored, isNull);
+    expect(progress.pending, isEmpty);
+    expect(notifier.state.hasWalk, isFalse);
+  });
+
+  test('sin internet: finaliza sin colgarse y conserva la ruta hasta que se sube', () async {
+    walks.online = false;
+    await notifier.startTracking(walk, 'p1');
+    await walkPoints(20);
+
+    final synced = await notifier.finishWalk();
+    await _flush();
+
+    expect(synced, isFalse);
+    expect(notifier.state.hasWalk, isFalse);
+    expect(progress.stored, isNull, reason: 'no debe ofrecer retomar un paseo ya finalizado');
+    expect(progress.pending.keys, ['w1']);
+    expect(progress.pending['w1']!.points, hasLength(20));
+
+    walks.reconnect();
+    await _flush();
+    expect(progress.pending, isEmpty, reason: 'el servidor confirmó: ya no hace falta el respaldo');
+  });
+
+  test('un paseo nuevo no borra la ruta pendiente de otro', () async {
+    walks.online = false;
+    await notifier.startTracking(walk, 'p1');
+    await walkPoints(20);
+    await notifier.finishWalk();
+    await _flush();
+
+    final otherWalk = Walk(
+      id: 'w2',
+      paseadorId: 'p1',
+      propietarioId: 'o1',
+      fechaPaseo: now,
+      horaInicio: '19:00',
+      fechaCreacion: now,
+      fechaModificacion: now,
+    );
+    await notifier.startTracking(otherWalk, 'p1');
+    await _flush();
+
+    expect(progress.stored!.walkId, 'w2');
+    expect(progress.pending.keys, ['w1']);
   });
 }

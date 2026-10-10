@@ -62,4 +62,33 @@ void main() {
     await repository.clear();
     expect(await repository.getFor(walkId: 'w1', paseadorId: 'p1'), isNull);
   });
+
+  test('los pendientes de subir no se mezclan con el paseo en curso', () async {
+    await repository.addPendingSync(progress(walkId: 'w1'));
+    await repository.save(progress(walkId: 'w2'));
+    await repository.clear();
+
+    final pending = await repository.getPendingSync();
+    expect(pending.map((p) => p.walkId), ['w1']);
+    expect(pending.single.points.length, 2);
+  });
+
+  test('guarda varios pendientes y los quita uno a uno', () async {
+    await repository.addPendingSync(progress(walkId: 'w1'));
+    await repository.addPendingSync(progress(walkId: 'w2'));
+    await repository.addPendingSync(progress(walkId: 'w1'));
+    expect((await repository.getPendingSync()).map((p) => p.walkId), ['w2', 'w1']);
+
+    await repository.removePendingSync('w2');
+    expect((await repository.getPendingSync()).map((p) => p.walkId), ['w1']);
+    await repository.removePendingSync('w1');
+    expect(await repository.getPendingSync(), isEmpty);
+  });
+
+  test('un pendiente antiguo no caduca', () async {
+    await repository.addPendingSync(
+      progress(savedAt: DateTime.now().subtract(const Duration(days: 3))),
+    );
+    expect(await repository.getPendingSync(), hasLength(1));
+  });
 }

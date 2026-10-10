@@ -17,6 +17,7 @@ import '../../features/walks/domain/repositories/walk_location_repository.dart';
 import '../../features/walks/domain/repositories/walk_progress_repository.dart';
 import '../../features/walks/domain/repositories/walks_repository.dart';
 import '../../features/walks/domain/use_cases/complete_walk_with_track_use_case.dart';
+import '../../features/walks/domain/use_cases/sync_pending_walk_use_case.dart';
 import '../../features/walks/domain/use_cases/update_walk_status_use_case.dart';
 import '../services/location_permission_service.dart';
 
@@ -97,5 +98,12 @@ final walkProgressRepositoryProvider = Provider<WalkProgressRepository>((ref) {
 final completeWalkWithTrackUseCaseProvider = Provider<CompleteWalkWithTrackUseCase>((ref) {
   final repository = ref.watch(walksRepositoryProvider);
   return CompleteWalkWithTrackUseCase(repository);
+});
+
+final syncPendingWalkUseCaseProvider = Provider<SyncPendingWalkUseCase>((ref) {
+  return SyncPendingWalkUseCase(
+    ref.watch(walksRepositoryProvider),
+    ref.watch(walkProgressRepositoryProvider),
+  );
 });
 

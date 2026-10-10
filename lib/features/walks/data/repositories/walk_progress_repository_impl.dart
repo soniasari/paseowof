@@ -8,7 +8,8 @@ class WalkProgressRepositoryImpl implements WalkProgressRepository {
 
   WalkProgressRepositoryImpl(this._localDataSource);
 
-  /// Un paseo guardado hace más de esto ya no se retoma.
+  /// Un paseo en curso guardado hace más de esto ya no se retoma.
+  /// No aplica a los pendientes de subir: esos se guardan hasta que el servidor confirme.
   static const Duration maxAge = Duration(hours: 12);
 
   @override
@@ -37,4 +38,34 @@ class WalkProgressRepositoryImpl implements WalkProgressRepository {
 
   @override
   Future<void> clear() => _localDataSource.delete();
+
+  @override
+  Future<void> addPendingSync(WalkProgress progress) async {
+    final current = await _localDataSource.readPending();
+    final updated = [
+      ...current.where((json) => json['walkId'] != progress.walkId),
+      WalkProgressMapper.toJson(progress),
+    ];
+    await _localDataSource.writePending(updated);
+  }
+
+  @override
+  Future<List<WalkProgress>> getPendingSync() async {
+    final raw = await _localDataSource.readPending();
+    final walks = <WalkProgress>[];
+    for (final json in raw) {
+      try {
+        walks.add(WalkProgressMapper.fromJson(json));
+      } catch (_) {}
+    }
+    return walks;
+  }
+
+  @override
+  Future<void> removePendingSync(String walkId) async {
+    final current = await _localDataSource.readPending();
+    await _localDataSource.writePending(
+      current.where((json) => json['walkId'] != walkId).toList(),
+    );
+  }
 }

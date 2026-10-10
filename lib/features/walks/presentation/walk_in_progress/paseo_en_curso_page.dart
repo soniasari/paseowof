@@ -119,7 +119,7 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
     return "$min'${sec.toString().padLeft(2, '0')}'' /km";
   }
 
-  static Future<void> _showPaseoCompletadoDialog(BuildContext context) async {
+  static Future<void> _showPaseoCompletadoDialog(BuildContext context, {required bool synced}) async {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -133,8 +133,8 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                 color: AppColors.button.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(
-                Icons.check_circle,
+              child: Icon(
+                synced ? Icons.check_circle : Icons.cloud_upload_outlined,
                 color: AppColors.button,
                 size: 64,
               ),
@@ -151,7 +151,9 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Ruta guardada correctamente',
+              synced
+                  ? 'Ruta guardada correctamente'
+                  : 'Ruta guardada en el teléfono. Se subirá automáticamente cuando tengas internet.',
               style: TextStyle(
                 fontSize: 14,
                 color: AppColors.textGrey,
@@ -396,8 +398,9 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                       final paseadorId = widget.paseadorId;
                       final fechaPaseo = widget.walk.fechaPaseo;
                       final nav = Navigator.of(context);
+                      bool? synced;
                       try {
-                        await notifier.finishWalk();
+                        synced = await notifier.finishWalk();
                       } catch (e) {
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -410,10 +413,10 @@ class _PaseoEnCursoPageState extends ConsumerState<PaseoEnCursoPage> {
                         return;
                       }
                       if (!mounted) return;
-                      if (!ref.read(walkInProgressProvider).hasWalk) {
+                      if (synced != null) {
                         ref.invalidate(walksByDateProvider(WalksByDateParams(paseadorId: paseadorId, date: fechaPaseo)));
                         ref.invalidate(walksByDateAllStatusProvider(WalksByDateParams(paseadorId: paseadorId, date: fechaPaseo)));
-                        await _showPaseoCompletadoDialog(context);
+                        await _showPaseoCompletadoDialog(context, synced: synced);
                         if (!mounted) return;
                         nav.popUntil((route) => route.isFirst);
                       }

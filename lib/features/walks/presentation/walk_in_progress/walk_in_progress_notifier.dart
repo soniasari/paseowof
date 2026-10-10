@@ -185,7 +185,12 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     final last = _lastProgressSaveAt;
     if (!force && last != null && now.difference(last) < _progressSaveInterval) return;
     _lastProgressSaveAt = now;
-    final progress = WalkProgress(
+    final progress = _snapshotProgress(now);
+    _enqueueStorage(() => _progressRepository.save(progress));
+  }
+
+  WalkProgress _snapshotProgress(DateTime savedAt) {
+    return WalkProgress(
       walkId: state.walk!.id,
       paseadorId: state.paseadorId!,
       startTime: _startTime!,
@@ -193,13 +198,25 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
       pausedAt: _pausedAt,
       distanceKm: _filter.totalDistanceKm,
       points: _filter.smoothedPoints,
-      savedAt: now,
+      savedAt: savedAt,
     );
-    _enqueueStorage(() => _progressRepository.save(progress));
   }
 
   void _clearProgress() {
     _enqueueStorage(_progressRepository.clear);
+  }
+
+  /// Sin conexión: el paseo pasa del espacio "en curso" a la lista de pendientes
+  /// y sale de ella solo cuando el servidor confirma la subida.
+  void _keepUntilSynced(WalkProgress progress, Future<void> whenSynced) {
+    _enqueueStorage(() async {
+      await _progressRepository.addPendingSync(progress);
+      await _progressRepository.clear();
+    });
+    unawaited(whenSynced.then(
+      (_) => _enqueueStorage(() => _progressRepository.removePendingSync(progress.walkId)),
+      onError: (_) {},
+    ));
   }
 
   void _enqueueStorage(Future<void> Function() op) {
@@ -415,17 +432,19 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     _saveProgress(force: true);
   }
 
-  /// Finaliza el paseo: obtiene los 15 puntos del filtro y sube a Firestore.
+  /// Finaliza el paseo: obtiene los 15 puntos del filtro y los guarda con el paseo.
   /// Requiere al menos 15 puntos GPS reales (no se rellena con duplicados).
-  Future<void> finishWalk() async {
-    if (!state.hasWalk || state.isFinishing) return;
+  /// Devuelve true si el servidor ya lo confirmó, false si quedó guardado en el
+  /// teléfono para subirse al volver internet, y null si no se pudo finalizar.
+  Future<bool?> finishWalk() async {
+    if (!state.hasWalk || state.isFinishing) return null;
 
     final pointsCount = _filter.smoothedPoints.length;
     if (pointsCount < 15) {
       state = state.copyWith(
         errorMessage: 'Se necesitan al menos 15 puntos para finalizar el paseo (actual: $pointsCount/15). Continúa el recorrido un poco más.',
       );
-      return;
+      return null;
     }
 
     state = state.copyWith(status: WalkInProgressStatus.finishing);
@@ -444,18 +463,24 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
       );
       _startStateTimer();
       _startGpsListening();
-      return;
+      return null;
     }
 
+    final progress = _snapshotProgress(DateTime.now());
     try {
-      await _completeWalkWithTrackUseCase.execute(
+      final result = await _completeWalkWithTrackUseCase.execute(
         paseadorId: paseadorId,
         walkId: walk.id,
         points: points,
         distanciaKm: distanceKm,
       );
-      _clearProgress();
+      if (result.synced) {
+        _clearProgress();
+      } else {
+        _keepUntilSynced(progress, result.whenSynced);
+      }
       state = const WalkInProgressState();
+      return result.synced;
     } catch (e) {
       _cancelled = false;
       state = WalkInProgressState(
@@ -471,6 +496,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
       _saveProgress(force: true);
       _startStateTimer();
       _startGpsListening();
+      return null;
     }
   }
 

@@ -1,3 +1,4 @@
+import '../entities/complete_walk_result.dart';
 import '../entities/gps_point.dart';
 import '../entities/walk.dart';
 import '../entities/walk_pet.dart';
@@ -12,14 +13,15 @@ abstract class WalksRepository {
   Future<void> saveWalkPet(String paseadorId, String paseoId, WalkPet walkPet);
   Future<List<WalkPet>> getWalkPetsByPaseoId(String paseadorId, String paseoId);
   Future<void> deleteWalk(String paseadorId, String walkId);
-  /// Guarda los 15 puntos, distancia total y metadatos en la subcolección gps_points_walk del paseo.
-  Future<void> saveWalkTrack(
-    String paseadorId,
-    String walkId,
+  /// Guarda los 15 puntos y el paseo completado en una sola escritura atómica.
+  /// Sin conexión no espera al servidor: devuelve [CompleteWalkResult.synced] en false.
+  Future<CompleteWalkResult> completeWalkWithTrack(
+    Walk completedWalk,
     List<GpsPoint> points, {
-    required String idPropietario,
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
   });
+  /// Se completa cuando el servidor confirmó todas las escrituras pendientes.
+  Future<void> waitForPendingWrites();
 }
