@@ -77,6 +77,9 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
     return elapsed < 0 ? 0 : elapsed;
   }
 
+  /// Minutos del tiempo en pantalla, sin las pausas. Se guarda al finalizar; el promedio se calcula en el backend.
+  int get _duracionRealMinutos => (_elapsedSeconds / 60).round();
+
   /// Hora del fix si es coherente con el reloj del dispositivo; si no (fix en caché
   /// antiguo, o reloj cambiado a mano), la hora actual.
   DateTime _normalizedFixTime(LocationFix fix) {
@@ -473,6 +476,7 @@ class WalkInProgressNotifier extends StateNotifier<WalkInProgressState> {
         walkId: walk.id,
         points: points,
         distanciaKm: distanceKm,
+        duracionRealMinutos: _duracionRealMinutos,
       );
       if (result.synced) {
         _clearProgress();

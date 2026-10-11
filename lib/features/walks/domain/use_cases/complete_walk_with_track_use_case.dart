@@ -1,10 +1,10 @@
 // =============================================================================
 // COMPLETE WALK WITH TRACK USE CASE
 // =============================================================================
-// Al finalizar el paseo: persiste los 15 puntos GPS y metadatos en
-// gps_points_walk y actualiza el paseo a estado completado con hora de fin,
-// en una sola escritura. Funciona sin conexión: la escritura queda en cola y
-// el resultado indica si el servidor ya la confirmó.
+// Al finalizar el paseo: persiste los 15 puntos GPS, la distancia, la duración
+// real en minutos y metadatos en gps_points_walk, y actualiza el paseo a estado
+// completado con hora de fin, en una sola escritura. Funciona sin conexión: la
+// escritura queda en cola y el resultado indica si el servidor ya la confirmó.
 // =============================================================================
 
 import 'package:intl/intl.dart';
@@ -22,6 +22,7 @@ class CompleteWalkWithTrackUseCase {
     required String walkId,
     required List<GpsPoint> points,
     required double distanciaKm,
+    required int duracionRealMinutos,
   }) async {
     if (points.length != 15) {
       throw ArgumentError('Se deben enviar exactamente 15 puntos; recibidos: ${points.length}');
@@ -51,6 +52,7 @@ class CompleteWalkWithTrackUseCase {
       idsMascotas: idsMascotas,
       nombreMascota: nombreMascota,
       distanciaKm: distanciaKm,
+      duracionRealMinutos: duracionRealMinutos,
     );
   }
 }

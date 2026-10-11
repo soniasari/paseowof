@@ -116,6 +116,7 @@ class _FakeWalksRepository implements WalksRepository {
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
+    required int duracionRealMinutos,
   }) async {
     savedWalk = completedWalk;
     savedPoints = points;

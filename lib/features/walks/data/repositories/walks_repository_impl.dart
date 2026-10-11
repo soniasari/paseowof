@@ -62,6 +62,7 @@ class WalksRepositoryImpl implements WalksRepository {
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
+    required int duracionRealMinutos,
   }) {
     return _remoteDataSource.completeWalkWithTrack(
       completedWalk,
@@ -69,6 +70,7 @@ class WalksRepositoryImpl implements WalksRepository {
       idsMascotas: idsMascotas,
       nombreMascota: nombreMascota,
       distanciaKm: distanciaKm,
+      duracionRealMinutos: duracionRealMinutos,
     );
   }
 

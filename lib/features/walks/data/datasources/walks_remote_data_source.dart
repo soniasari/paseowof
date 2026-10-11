@@ -25,6 +25,7 @@ abstract class WalksRemoteDataSource {
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
+    required int duracionRealMinutos,
   });
   /// Se completa cuando el servidor confirmó todas las escrituras en cola.
   Future<void> waitForPendingWrites();
@@ -257,6 +258,7 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
+    required int duracionRealMinutos,
   }) async {
     final paseadorId = completedWalk.paseadorId;
     final walkId = completedWalk.id;
@@ -270,6 +272,7 @@ class WalksRemoteDataSourceImpl implements WalksRemoteDataSource {
         'idsMascotas': idsMascotas,
         'nombreMascota': nombreMascota,
         'distanciaKm': distanciaKm,
+        'duracionRealMinutos': duracionRealMinutos,
       })
       ..set(
         _firestore.collection(FirestorePaths.paseosPath(paseadorId)).doc(walkId),

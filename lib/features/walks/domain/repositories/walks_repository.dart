@@ -21,6 +21,7 @@ abstract class WalksRepository {
     required List<String> idsMascotas,
     required String nombreMascota,
     required double distanciaKm,
+    required int duracionRealMinutos,
   });
   /// Se completa cuando el servidor confirmó todas las escrituras pendientes.
   Future<void> waitForPendingWrites();
